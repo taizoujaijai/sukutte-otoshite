@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>試作2：景品の3Dモデル</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .label { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(255,250,243,.92); border: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
+  .label small { color: #8a6a7a; }
+  .row-title { font-size: 14px; font-weight: bold; padding: 4px 10px; border-radius: 8px; background: var(--pink); color: #fff; white-space: nowrap; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<header class="bar">
+  <a href="./" class="back">← 試作一覧</a>
+  <h1>試作2：景品の3Dモデル</h1>
+  <div class="seg" id="styles"></div>
+</header>
+<p class="note">上の3段は<b>コードで組み立てた</b>景品（テイストを切り替えられます）。いちばん下の段は<b>フリー素材（glTF）</b>の例です。ドラッグで回転、ホイール／ピンチで拡大できます。</p>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { createRenderer, applyStyle, onResize, disposeScene } from './common.js';
+import { STYLES, NORMAL_PRIZES, BIG_PRIZES, makePrize, seeded } from './prizes.js';
+
+// フリー素材の例（Khronos glTF Sample Assets）
+const ASSET_BASE = 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models/';
+const FREE_ASSETS = [
+  { file: 'ToyCar/glTF-Binary/ToyCar.glb', name: 'おもちゃの車', license: 'CC0' },
+  { file: 'Duck/glTF-Binary/Duck.glb', name: 'アヒル', license: 'SCEA Shared Source' },
+  { file: 'Avocado/glTF-Binary/Avocado.glb', name: 'アボカド', license: 'CC0' },
+];
+
+const view = document.getElementById('view');
+const renderer = createRenderer(view);
+const labels = new CSS2DRenderer();
+labels.setSize(view.clientWidth, view.clientHeight);
+Object.assign(labels.domElement.style, { position: 'fixed', inset: '0', pointerEvents: 'none' });
+document.body.appendChild(labels.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 100);
+camera.position.set(0, 10, 13.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.2, 0);
+controls.enableDamping = true;
+onResize(renderer, camera, view, (w, h) => labels.setSize(w, h));
+
+let style = new URLSearchParams(location.search).get('style') || 'toon';
+const spinners = [];
+const gltfCache = {};
+
+function label(text, sub, cls = 'label') {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.innerHTML = sub ? `${text} <small>${sub}</small>` : text;
+  return new CSS2DObject(el);
+}
+
+// 大きさをそろえて置く
+function fit(obj, size) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const s = box.getSize(new THREE.Vector3());
+  const k = size / Math.max(s.x, s.y, s.z);
+  obj.scale.multiplyScalar(k);
+  const box2 = new THREE.Box3().setFromObject(obj);
+  const c = box2.getCenter(new THREE.Vector3());
+  obj.position.x -= c.x;
+  obj.position.z -= c.z;
+  obj.position.y -= box2.min.y;
+}
+
+function placeRow(items, z, size, title) {
+  const gap = 2.0;
+  const x0 = -((items.length - 1) * gap) / 2;
+  items.forEach(({ obj, name, sub }, i) => {
+    const holder = new THREE.Group();
+    holder.position.set(x0 + i * gap, 0, z);
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.75, 0.08, 32), new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6 }));
+    stand.position.y = -0.04;
+    stand.receiveShadow = true;
+    holder.add(stand);
+    const spin = new THREE.Group();
+    fit(obj, size);
+    spin.add(obj);
+    holder.add(spin);
+    const l = label(name, sub);
+    l.position.set(0, -0.1, 0.95);
+    holder.add(l);
+    scene.add(holder);
+    spinners.push(spin);
+  });
+  const t = label(title, '', 'row-title');
+  t.position.set(-6.6, 0.3, z);
+  scene.add(t);
+}
+
+async function build() {
+  disposeScene(scene);
+  spinners.length = 0;
+  document.querySelectorAll('.label, .row-title').forEach((e) => e.remove());
+  applyStyle(scene, renderer, style, { shadowSize: 9, target: new THREE.Vector3(0, 0, 0) });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: style === 'real' ? '#2e2840' : '#fff1f6', roughness: 0.9 }));
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.y = -0.08;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  const rnd = seeded(3);
+  const normal = Object.entries(NORMAL_PRIZES).map(([k, d]) => ({ obj: makePrize(k, style, rnd), name: d.name }));
+  placeRow(normal, -4.2, 0.9, '普通の景品');
+  const big = Object.entries(BIG_PRIZES);
+  placeRow(big.slice(0, 5).map(([k, d]) => ({ obj: makePrize(k, style, rnd), name: d.name })), -1.4, 1.2, '大物 1〜5');
+  placeRow(big.slice(5).map(([k, d]) => ({ obj: makePrize(k, style, rnd), name: d.name })), 1.4, 1.2, '大物 6〜10');
+
+  const loader = new GLTFLoader();
+  const free = await Promise.all(FREE_ASSETS.map(async (a) => {
+    if (!gltfCache[a.file]) gltfCache[a.file] = loader.loadAsync(ASSET_BASE + a.file);
+    const gltf = await gltfCache[a.file];
+    const obj = gltf.scene.clone(true);
+    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    return { obj, name: a.name, sub: a.license };
+  }));
+  placeRow(free, 4.2, 1.1, 'フリー素材');
+}
+
+const seg = document.getElementById('styles');
+for (const [key, lab] of Object.entries(STYLES)) {
+  const b = document.createElement('button');
+  b.textContent = lab;
+  b.dataset.style = key;
+  b.onclick = () => { style = key; refresh(); };
+  seg.appendChild(b);
+}
+function refresh() {
+  document.querySelectorAll('#styles button').forEach((b) => b.classList.toggle('on', b.dataset.style === style));
+  history.replaceState(null, '', `?style=${style}`);
+  build();
+}
+refresh();
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  spinners.forEach((s) => (s.rotation.y += dt * 0.6));
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+});
+</script>
+</body>
+</html>

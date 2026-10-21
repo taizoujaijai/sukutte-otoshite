@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>試作4：フリー素材の候補</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .label { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(255,250,243,.94); border: 1px solid var(--line); color: var(--ink); white-space: nowrap; text-align: center; }
+  .label small { display: block; color: #8a6a7a; font-size: 11px; }
+  .label.code { border-color: #9fd7ff; }
+  .label.free { border-color: var(--pink); }
+  .panel { position: fixed; left: 16px; bottom: 16px; max-width: 560px; padding: 10px 14px; border-radius: 12px; background: rgba(255,250,243,.94); border: 1px solid var(--line); font-size: 13px; line-height: 1.6; z-index: 5; }
+  .panel p { margin: 0 0 4px; }
+  .panel ul { margin: 0; padding-left: 18px; }
+  .panel a { color: #c03070; }
+  #loading { font-weight: bold; color: #c03070; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="view"></div>
+<header class="bar">
+  <a href="./" class="back">← 試作一覧</a>
+  <h1>試作4：フリー素材の候補</h1>
+  <div class="seg" id="cats"></div>
+  <button id="toon" class="on">トゥーン化：オン</button>
+  <button id="pastel" class="on">色：パステル寄り</button>
+</header>
+<div class="panel" id="panel"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { createRenderer, applyStyle, onResize } from './common.js';
+import { ALL_PRIZES, makePrize, seeded } from './prizes.js?v=2';
+import { CATEGORIES, toonify, setToon, setPastel } from './free-assets.js?v=2';
+
+const SIZE = 1.25;      // 並べるときの大きさ
+const OUTLINE = 0.018;  // 輪郭線の太さ（見た目）
+
+const view = document.getElementById('view');
+const renderer = createRenderer(view);
+const labels = new CSS2DRenderer();
+labels.setSize(view.clientWidth, view.clientHeight);
+Object.assign(labels.domElement.style, { position: 'fixed', inset: '0', pointerEvents: 'none' });
+document.body.appendChild(labels.domElement);
+
+const scene = new THREE.Scene();
+applyStyle(scene, renderer, 'toon', { shadowSize: 8 });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshToonMaterial({ color: '#fff1f6' }));
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.08;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const camera = new THREE.PerspectiveCamera(38, view.clientWidth / view.clientHeight, 0.1, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+onResize(renderer, camera, view, (w, h) => labels.setSize(w, h));
+
+const loader = new GLTFLoader();
+const cache = {};      // uuid -> Promise<{ scene, animations }>
+const row = new THREE.Group();
+scene.add(row);
+const spinners = [];
+const mixers = [];
+let toonOn = true;
+let pastelOn = true;
+let rowWidth = 4;
+let current;
+
+function label(text, sub, cls) {
+  const el = document.createElement('div');
+  el.className = `label ${cls}`;
+  el.innerHTML = `${text}${sub ? `<small>${sub}</small>` : ''}`;
+  return new CSS2DObject(el);
+}
+
+// 大きさをそろえ、足元を台に合わせる
+function fit(obj) {
+  obj.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(obj);
+  const s = box.getSize(new THREE.Vector3());
+  obj.scale.multiplyScalar(SIZE / Math.max(s.x, s.y, s.z));
+  obj.updateMatrixWorld(true);
+  const box2 = new THREE.Box3().setFromObject(obj);
+  const c = box2.getCenter(new THREE.Vector3());
+  obj.position.x -= c.x;
+  obj.position.z -= c.z;
+  obj.position.y -= box2.min.y;
+}
+
+function loadAsset(a) {
+  if (!cache[a.uuid]) {
+    cache[a.uuid] = loader.loadAsync(a.url).then((gltf) => {
+      const root = new THREE.Group();
+      root.add(gltf.scene);
+      fit(root);
+      toonify(root, OUTLINE);
+      return { root, animations: gltf.animations };
+    });
+  }
+  return cache[a.uuid];
+}
+
+function place(obj, x, text, sub, cls) {
+  const holder = new THREE.Group();
+  holder.position.x = x;
+  const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.85, 0.08, 40), new THREE.MeshToonMaterial({ color: cls === 'code' ? '#e6f4ff' : '#ffe6ef' }));
+  stand.position.y = -0.04;
+  stand.receiveShadow = true;
+  holder.add(stand);
+  const spin = new THREE.Group();
+  spin.add(obj);
+  holder.add(spin);
+  const l = label(text, sub, cls);
+  l.position.set(0, -0.12, 1.0);
+  holder.add(l);
+  row.add(holder);
+  spinners.push(spin);
+}
+
+async function show(cat) {
+  current = cat;
+  document.querySelectorAll('#cats button').forEach((b) => b.classList.toggle('on', b.dataset.key === cat.key));
+  history.replaceState(null, '', `?cat=${cat.key}`);
+  // 前の並びを片付ける（読み込んだ素材は使い回すので捨てない）
+  row.children.forEach((h) => h.traverse((o) => { if (o.element) o.element.remove(); }));
+  row.clear();
+  spinners.length = 0;
+  mixers.length = 0;
+
+  const n = cat.code.length + cat.assets.length;
+  const gap = 2.0;
+  const extra = cat.code.length && cat.assets.length ? 0.8 : 0; // コード製と素材のあいだを少し空ける
+  let x = -((n - 1) * gap + extra) / 2;
+  const rnd = seeded(5);
+  for (const kind of cat.code) {
+    const obj = makePrize(kind, 'toon', rnd);
+    const g = new THREE.Group();
+    g.add(obj);
+    fit(g);
+    place(g, x, ALL_PRIZES[kind].name, 'コード製', 'code');
+    x += gap;
+  }
+  x += extra;
+
+  const panel = document.getElementById('panel');
+  panel.innerHTML = `<p><b>${cat.name}</b>：左の青い台がコード製、右のピンクの台がフリー素材（CC0）です。${cat.note ?? ''} <span id="loading">読み込み中…</span></p>
+    <ul>${cat.assets.map((a) => `<li>${a.name}（${a.author}・${a.license}）<a href="${a.page}" target="_blank" rel="noopener">配布ページ</a></li>`).join('')}</ul>`;
+
+  const xs = cat.assets.map((_, i) => x + i * gap);
+  const loaded = await Promise.all(cat.assets.map((a) => loadAsset(a).catch(() => null)));
+  if (current !== cat) return;
+  loaded.forEach((res, i) => {
+    const a = cat.assets[i];
+    if (!res) {
+      place(new THREE.Group(), xs[i], a.name, '読み込めませんでした', 'free');
+      return;
+    }
+    res.root.removeFromParent();
+    setToon(res.root, toonOn);
+    setPastel(res.root, pastelOn);
+    place(res.root, xs[i], a.name, `${a.author}・CC0`, 'free');
+    // 骨入りのモデルは待機のアニメーションを流す
+    const idle = res.animations.find((c) => /idle/i.test(c.name));
+    if (idle) {
+      const mixer = new THREE.AnimationMixer(res.root);
+      mixer.clipAction(idle).play();
+      mixers.push(mixer);
+    }
+  });
+  document.getElementById('loading')?.remove();
+
+  rowWidth = (n - 1) * gap + extra;
+  frame();
+}
+
+// 列全体が画面に収まる距離にカメラを置く
+function frame() {
+  const half = rowWidth / 2 + 1.1;
+  const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+  const dist = Math.max(4.5, half / tanH);
+  camera.position.set(0, 1.2 + dist * 0.38, dist * 0.92);
+  controls.target.set(0, 0.55, 0);
+  controls.update();
+}
+addEventListener('resize', frame);
+
+const cats = document.getElementById('cats');
+for (const c of CATEGORIES) {
+  const b = document.createElement('button');
+  b.textContent = c.name;
+  b.dataset.key = c.key;
+  b.onclick = () => show(c);
+  cats.appendChild(b);
+}
+document.getElementById('toon').onclick = (e) => {
+  toonOn = !toonOn;
+  e.target.textContent = `トゥーン化：${toonOn ? 'オン' : 'オフ'}`;
+  e.target.classList.toggle('on', toonOn);
+  for (const k in cache) cache[k].then((r) => setToon(r.root, toonOn)).catch(() => {});
+};
+document.getElementById('pastel').onclick = (e) => {
+  pastelOn = !pastelOn;
+  e.target.textContent = `色：${pastelOn ? 'パステル寄り' : '元のまま'}`;
+  e.target.classList.toggle('on', pastelOn);
+  for (const k in cache) cache[k].then((r) => setPastel(r.root, pastelOn)).catch(() => {});
+};
+
+const start = CATEGORIES.find((c) => c.key === new URLSearchParams(location.search).get('cat')) || CATEGORIES[0];
+show(start);
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta();
+  spinners.forEach((s) => (s.rotation.y += dt * 0.5));
+  mixers.forEach((m) => m.update(dt));
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>試作一覧</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { overflow: auto; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .lead { margin: 0 0 24px; line-height: 1.7; }
+  .card { display: block; padding: 18px 20px; margin-bottom: 14px; border-radius: 16px; border: 1px solid var(--line); background: #fff; color: var(--ink); text-decoration: none; }
+  .card:hover { border-color: var(--pink); }
+  .card h2 { font-size: 18px; margin: 0 0 6px; }
+  .card p { margin: 0; font-size: 14px; line-height: 1.7; }
+  .links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .links a { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+  .links a:hover { background: var(--pink); color: #fff; border-color: var(--pink); }
+</style>
+</head>
+<body>
+<main>
+  <h1>すくっておとしてスペシャル 試作</h1>
+  <p class="lead">仕様書16章の「試作を見比べて決める項目」の試作です。気に入った案を教えてください。</p>
+
+  <div class="card">
+    <h2>試作1：見た目のテイスト</h2>
+    <p>4席の台全体を3つのテイストで描きます。土台は8角形と円を切り替えられます。中央の島のまわりを景品の川が回り、台の左右からこぼれた景品は坂を滑って川に戻ります。手前の席では、腕が「肘を伸ばして川へ → 手首を回してすくう → その角度のまま上段へ運ぶ → 手首を回して落とす」を繰り返します（物理演算はまだ入れていません）。</p>
+    <div class="links">
+      <a href="look.html?style=toon">トゥーン調</a>
+      <a href="look.html?style=real">リアル調</a>
+      <a href="look.html?style=lowpoly">ローポリ</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>試作2：景品の3Dモデル</h2>
+    <p>コードで組み立てた普通の景品6種類と大物10種類を並べ、フリー素材（glTF）の例と比べます。</p>
+    <div class="links">
+      <a href="models.html?style=toon">トゥーン調で見る</a>
+      <a href="models.html?style=real">リアル調で見る</a>
+      <a href="models.html?style=lowpoly">ローポリで見る</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>試作4：フリー素材の候補（CC0）</h2>
+    <p>Poly Pizza で配布されている CC0 の3Dモデル（Kenney、Quaternius など）を景品の種類ごとに集め、トゥーン調に変えてコード製と並べました。「トゥーン化」を切り替えると元の見た目と比べられます。</p>
+    <div class="links">
+      <a href="free.html?cat=candy">飴</a>
+      <a href="free.html?cat=choco">チョコ</a>
+      <a href="free.html?cat=sweets">新しいお菓子</a>
+      <a href="free.html?cat=box">小箱</a>
+      <a href="free.html?cat=gem">宝石</a>
+      <a href="free.html?cat=ring">指輪</a>
+      <a href="free.html?cat=animal">動物</a>
+      <a href="free.html?cat=car">車</a>
+      <a href="free.html?cat=dino">恐竜</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>試作3：宝箱のイラスト</h2>
+    <p>「景品を見る」の宝箱を3案で作りました。スライダーやボタンで景品を増やすと、箱からあふれてこぼれます。</p>
+    <div class="links">
+      <a href="illust.html?tab=a">A：3Dモデルから描く</a>
+      <a href="illust.html?tab=b">B：SVGの手描き風</a>
+      <a href="illust.html?tab=c">C：宝箱も3Dで物理演算</a>
+    </div>
+  </div>
+</main>
+</body>
+</html>

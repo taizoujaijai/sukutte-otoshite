@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>試作3：宝箱のイラスト</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { overflow: auto; }
+  main { padding: 76px 16px 24px; max-width: 900px; margin: 0 auto; }
+  .stage { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); background: #fff4e6; }
+  .stage > canvas, .stage > svg, .stage > div { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; font-size: 14px; }
+  .controls input[type=range] { flex: 1; min-width: 180px; accent-color: var(--pink); }
+  .status { font-weight: bold; }
+  .status.over { color: #e0306f; }
+  .desc { font-size: 14px; line-height: 1.7; margin: 8px 0 0; }
+  [hidden] { display: none !important; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+} }
+</script>
+</head>
+<body>
+<header class="bar">
+  <a href="./" class="back">← 試作一覧</a>
+  <h1>試作3：宝箱のイラスト</h1>
+  <div class="seg" id="tabs">
+    <button data-tab="a">A：3Dモデルから描く</button>
+    <button data-tab="b">B：SVGの手描き風</button>
+    <button data-tab="c">C：宝箱も3Dで物理演算</button>
+  </div>
+</header>
+<main>
+  <section id="tab-a" hidden>
+    <div class="stage"><canvas id="canvas-a" width="800" height="600"></canvas></div>
+    <div class="controls">
+      <label for="range-a">取った景品の数</label>
+      <input type="range" id="range-a" min="0" max="100" value="40">
+      <span id="count-a"></span><span class="status" id="status-a"></span>
+    </div>
+    <p class="desc">台の上と同じ3Dモデル（トゥーン調）を画像にして、2Dの宝箱に詰めます。台と景品の見た目がそろいます。</p>
+  </section>
+  <section id="tab-b" hidden>
+    <div class="stage" id="stage-b"></div>
+    <div class="controls">
+      <label for="range-b">取った景品の数</label>
+      <input type="range" id="range-b" min="0" max="100" value="40">
+      <span id="count-b"></span><span class="status" id="status-b"></span>
+    </div>
+    <p class="desc">絵本のような手描き風のイラストをSVGで描きます。線を少し揺らして手描きらしさを出しています。3Dの台とは別の味わいになります。</p>
+  </section>
+  <section id="tab-c" hidden>
+    <div class="stage" id="stage-c"></div>
+    <div class="controls">
+      <button id="drop5">景品を5個入れる</button>
+      <button id="dropBig">大物を入れる</button>
+      <button id="auto">自動で入れ続ける</button>
+      <button id="clear">空にする</button>
+      <span id="count-c"></span><span class="status" id="status-c"></span>
+    </div>
+    <p class="desc">宝箱も3Dで作り、取った景品を物理演算で上から落として詰めます。あふれた景品は実際に箱からこぼれます。ドラッグで回せます。</p>
+  </section>
+</main>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as CANNON from 'cannon-es';
+import { applyStyle } from './common.js';
+import { ALL_PRIZES, BIG_PRIZES, makePrize, randomNormalKind } from './prizes.js';
+import { CHEST, prizeSequence, layoutChest, countToOverflow } from './chest-layout.js';
+import { svgIcon } from './svg-icons.js';
+
+const MAX = Math.ceil(countToOverflow() * 1.35);
+const SEQ = prizeSequence(MAX);
+const OVER_AT = countToOverflow();
+for (const id of ['range-a', 'range-b']) {
+  const r = document.getElementById(id);
+  r.max = MAX;
+  r.value = Math.round(OVER_AT * 0.6);
+}
+
+function setStatus(id, n, overflowed) {
+  document.getElementById(`count-${id}`).textContent = `${n}個`;
+  const st = document.getElementById(`status-${id}`);
+  st.textContent = overflowed ? 'あふれた！ クリア' : `（あと少しであふれる目安：${OVER_AT}個）`;
+  st.classList.toggle('over', overflowed);
+}
+
+// ---------- 案A：3Dモデルを画像にする ----------
+const iconImages = {};
+async function renderIcons() {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setSize(256, 256);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  applyStyle(scene, renderer, 'toon', { shadowSize: 2 });
+  scene.background = null;
+  renderer.shadowMap.enabled = false;
+  const cam = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
+  for (const kind of Object.keys(ALL_PRIZES)) {
+   iconImages[kind] = [];
+   // 普通の景品は色違いを3つ作る
+   for (const v of kind in BIG_PRIZES ? [0.4] : [0.05, 0.4, 0.75]) {
+    const obj = makePrize(kind, 'toon', () => v);
+    obj.rotation.y = kind in BIG_PRIZES ? 0.5 : 0.7;
+    obj.rotation.x = kind in BIG_PRIZES ? 0 : 0.35;
+    const holder = new THREE.Group();
+    holder.add(obj);
+    scene.add(holder);
+    const box = new THREE.Box3().setFromObject(holder);
+    const c = box.getCenter(new THREE.Vector3());
+    const r = box.getSize(new THREE.Vector3()).length() / 2;
+    cam.position.set(c.x, c.y + r * 0.8, c.z + r * 3.4);
+    cam.lookAt(c);
+    renderer.render(scene, cam);
+    const img = new Image();
+    img.src = renderer.domElement.toDataURL('image/png');
+    await img.decode();
+    iconImages[kind].push(img);
+    scene.remove(holder);
+   }
+  }
+  renderer.dispose();
+}
+
+function drawChestBack(ctx) {
+  // ふた（開いて奥に倒れている）
+  ctx.save();
+  ctx.fillStyle = '#b8743c';
+  ctx.strokeStyle = '#5a3420';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(165, 255); ctx.lineTo(195, 120); ctx.quadraticCurveTo(400, 70, 605, 120); ctx.lineTo(635, 255); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e8b64a';
+  for (const x of [250, 550]) { ctx.fillRect(x - 14, 110, 28, 145); ctx.strokeRect(x - 14, 110, 28, 145); }
+  // 奥の壁と中
+  ctx.fillStyle = '#7a4524';
+  ctx.fillRect(170, 255, 460, 180);
+  ctx.strokeRect(170, 255, 460, 180);
+  ctx.restore();
+}
+
+function drawChestFront(ctx) {
+  ctx.save();
+  ctx.fillStyle = '#c98244';
+  ctx.strokeStyle = '#5a3420';
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(150, 420, 500, 130, 14);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#e8b64a';
+  for (const x of [250, 550]) { ctx.fillRect(x - 16, 420, 32, 130); ctx.strokeRect(x - 16, 420, 32, 130); }
+  ctx.fillRect(150, 420, 500, 22); ctx.strokeRect(150, 420, 500, 22);
+  // 錠前
+  ctx.beginPath(); ctx.roundRect(372, 452, 56, 62, 10); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#5a3420';
+  ctx.beginPath(); ctx.arc(400, 478, 8, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(396, 480, 8, 20);
+  ctx.restore();
+}
+
+function drawA() {
+  const n = +document.getElementById('range-a').value;
+  const { items, overflowed } = layoutChest(SEQ.slice(0, n));
+  const ctx = document.getElementById('canvas-a').getContext('2d');
+  ctx.clearRect(0, 0, 800, 600);
+  // 床
+  ctx.fillStyle = '#ffe2c4';
+  ctx.fillRect(0, 540, 800, 60);
+  drawChestBack(ctx);
+  const drawItem = (it) => {
+    const imgs = iconImages[it.kind];
+    if (!imgs) return;
+    const img = imgs[Math.floor(Math.abs(it.x * 7 + it.y * 3)) % imgs.length];
+    ctx.save();
+    ctx.translate(it.x, it.y);
+    ctx.rotate(it.rot);
+    const s = it.size * 1.25;
+    ctx.drawImage(img, -s / 2, -s / 2, s, s);
+    ctx.restore();
+  };
+  items.filter((i) => !i.outside).forEach(drawItem);
+  drawChestFront(ctx);
+  items.filter((i) => i.outside).forEach(drawItem);
+  setStatus('a', n, overflowed);
+}
+
+// ---------- 案B：SVGの手描き風 ----------
+const CHEST_SVG_BACK = `
+  <path d="M165 255 L195 120 Q400 70 605 120 L635 255 Z" fill="#e0a060" stroke="#4a3040" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M236 112 V255 M264 108 V255 M536 108 V255 M564 112 V255" stroke="#4a3040" stroke-width="4"/>
+  <rect x="170" y="255" width="460" height="180" fill="#9a5a34" stroke="#4a3040" stroke-width="5"/>
+  <path d="M200 300 Q260 290 320 302 M420 330 Q500 318 590 334" stroke="#7a4426" stroke-width="3" fill="none"/>`;
+const CHEST_SVG_FRONT = `
+  <rect x="150" y="420" width="500" height="130" rx="14" fill="#e8a868" stroke="#4a3040" stroke-width="5"/>
+  <rect x="150" y="420" width="500" height="22" fill="#ffd36e" stroke="#4a3040" stroke-width="4"/>
+  <rect x="234" y="420" width="32" height="130" fill="#ffd36e" stroke="#4a3040" stroke-width="4"/>
+  <rect x="534" y="420" width="32" height="130" fill="#ffd36e" stroke="#4a3040" stroke-width="4"/>
+  <rect x="372" y="452" width="56" height="62" rx="10" fill="#ffd36e" stroke="#4a3040" stroke-width="4"/>
+  <circle cx="400" cy="478" r="8" fill="#4a3040"/><rect x="396" y="480" width="8" height="20" fill="#4a3040"/>
+  <path d="M180 470 Q220 462 230 480 M290 500 Q330 490 360 504" stroke="#c58548" stroke-width="3" fill="none"/>`;
+
+function drawB() {
+  const n = +document.getElementById('range-b').value;
+  const { items, overflowed } = layoutChest(SEQ.slice(0, n));
+  const item = (it) => {
+    const s = it.size * 1.1;
+    return `<g transform="translate(${it.x} ${it.y}) rotate(${(it.rot * 180) / Math.PI})"><g transform="translate(${-s / 2} ${-s / 2})">${svgIcon(it.kind, s)}</g></g>`;
+  };
+  document.getElementById('stage-b').innerHTML = `
+    <svg viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="wobble"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="3.5"/></filter>
+        <pattern id="paper" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#fff6e8"/><circle cx="2" cy="2" r="0.8" fill="#f3e2c8"/></pattern>
+      </defs>
+      <rect width="800" height="600" fill="url(#paper)"/>
+      <path d="M0 548 Q400 532 800 548 V600 H0 Z" fill="#ffe2c4"/>
+      <g filter="url(#wobble)">
+        ${CHEST_SVG_BACK}
+        ${items.filter((i) => !i.outside).map(item).join('')}
+        ${CHEST_SVG_FRONT}
+        ${items.filter((i) => i.outside).map(item).join('')}
+      </g>
+    </svg>`;
+  setStatus('b', n, overflowed);
+}
+
+// ---------- 案C：宝箱も3Dで物理演算 ----------
+let cInit = false;
+function initC() {
+  if (cInit) return;
+  cInit = true;
+  const stage = document.getElementById('stage-c');
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  stage.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  applyStyle(scene, renderer, 'toon', { shadowSize: 4 });
+  scene.background = new THREE.Color('#fff4e6');
+  const camera = new THREE.PerspectiveCamera(40, 4 / 3, 0.1, 100);
+  camera.position.set(0, 5.6, 5.4);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0.6, 0);
+  controls.enableDamping = true;
+  const resize = () => {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  };
+  resize();
+  addEventListener('resize', resize);
+
+  const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -40, 0) });
+  world.allowSleep = true;
+  world.broadphase = new CANNON.SAPBroadphase(world);
+  world.defaultContactMaterial.friction = 0.45;
+  world.defaultContactMaterial.restitution = 0.05;
+
+  // 床
+  const floorMesh = new THREE.Mesh(new THREE.CircleGeometry(12, 48), new THREE.MeshToonMaterial({ color: '#ffe2c4' }));
+  floorMesh.rotation.x = -Math.PI / 2;
+  floorMesh.receiveShadow = true;
+  scene.add(floorMesh);
+  const floorBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
+  floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  world.addBody(floorBody);
+
+  // 宝箱：内寸 W x D x H
+  const W = 3.2, D = 1.9, H = 1.2, T = 0.1;
+  const wood = new THREE.MeshToonMaterial({ color: '#c98244' });
+  const gold = new THREE.MeshToonMaterial({ color: '#e8b64a' });
+  const chest = new THREE.Group();
+  scene.add(chest);
+  const addWall = (w, h, d, x, y, z, m = wood) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = mesh.receiveShadow = true;
+    chest.add(mesh);
+    const body = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)) });
+    body.position.set(x, y, z);
+    world.addBody(body);
+  };
+  addWall(W + T * 2, T, D + T * 2, 0, T / 2, 0);
+  addWall(W + T * 2, H, T, 0, H / 2 + T, D / 2 + T / 2);
+  addWall(W + T * 2, H, T, 0, H / 2 + T, -D / 2 - T / 2);
+  addWall(T, H, D, W / 2 + T / 2, H / 2 + T, 0);
+  addWall(T, H, D, -W / 2 - T / 2, H / 2 + T, 0);
+  // 金具（見た目だけ）
+  for (const x of [-0.9, 0.9]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.16, H + T, D + T * 2 + 0.02), gold);
+    band.position.set(x, (H + T) / 2, 0);
+    band.castShadow = true;
+    chest.add(band);
+  }
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.06), gold);
+  lock.position.set(0, H * 0.7, D / 2 + T + 0.03);
+  chest.add(lock);
+  // ふた（奥に開いた状態）
+  const lid = new THREE.Group();
+  lid.position.set(0, H + T, -D / 2 - T);
+  const lidMesh = new THREE.Mesh(new THREE.CylinderGeometry(D / 2 + T, D / 2 + T, W + T * 2, 24, 1, false, 0, Math.PI), wood);
+  lidMesh.rotation.z = Math.PI / 2;
+  lidMesh.position.z = D / 2 + T;
+  lidMesh.castShadow = true;
+  lid.add(lidMesh);
+  lid.rotation.x = -1.9;
+  chest.add(lid);
+
+  const bodies = [];
+  const tmpBox = new THREE.Box3();
+  function drop(kind) {
+    const mesh = makePrize(kind, 'toon');
+    tmpBox.setFromObject(mesh);
+    const size = tmpBox.getSize(new THREE.Vector3());
+    const center = tmpBox.getCenter(new THREE.Vector3());
+    // 見た目の中心を物体の中心に合わせる
+    mesh.children.forEach((ch) => ch.position.sub(center));
+    const holder = new THREE.Group();
+    holder.add(mesh);
+    scene.add(holder);
+    const body = new CANNON.Body({
+      mass: ALL_PRIZES[kind].volume,
+      shape: new CANNON.Box(new CANNON.Vec3(size.x * 0.45, size.y * 0.45, size.z * 0.45)),
+      sleepSpeedLimit: 0.2,
+      sleepTimeLimit: 0.6,
+      angularDamping: 0.3,
+    });
+    body.position.set((Math.random() - 0.5) * (W - 0.4), H + 1.6 + Math.random() * 0.6, (Math.random() - 0.5) * (D - 0.4));
+    body.quaternion.setFromEuler(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    world.addBody(body);
+    bodies.push({ body, holder });
+    if (bodies.length > 260) {
+      const old = bodies.shift();
+      world.removeBody(old.body);
+      scene.remove(old.holder);
+    }
+  }
+
+  let auto = null;
+  document.getElementById('drop5').onclick = () => { for (let i = 0; i < 5; i++) setTimeout(() => drop(randomNormalKind()), i * 120); };
+  document.getElementById('dropBig').onclick = () => {
+    const ks = Object.keys(BIG_PRIZES);
+    drop(ks[Math.floor(Math.random() * ks.length)]);
+  };
+  document.getElementById('auto').onclick = (e) => {
+    if (auto) { clearInterval(auto); auto = null; e.target.classList.remove('on'); return; }
+    e.target.classList.add('on');
+    auto = setInterval(() => drop(Math.random() < 0.06 ? Object.keys(BIG_PRIZES)[Math.floor(Math.random() * 10)] : randomNormalKind()), 180);
+  };
+  document.getElementById('clear').onclick = () => {
+    for (const b of bodies) { world.removeBody(b.body); scene.remove(b.holder); }
+    bodies.length = 0;
+  };
+
+  const clock = new THREE.Clock();
+  renderer.setAnimationLoop(() => {
+    const dt = Math.min(clock.getDelta(), 1 / 30);
+    world.step(1 / 60, dt, 4);
+    let outside = 0;
+    for (const { body, holder } of bodies) {
+      holder.position.copy(body.position);
+      holder.quaternion.copy(body.quaternion);
+      const p = body.position;
+      const inX = Math.abs(p.x) < W / 2 + T, inZ = Math.abs(p.z) < D / 2 + T;
+      if (p.y < 0.6 && !(inX && inZ)) outside++;
+    }
+    document.getElementById('count-c').textContent = `${bodies.length}個`;
+    const st = document.getElementById('status-c');
+    st.textContent = outside > 0 ? `あふれた！ クリア（外に${outside}個）` : '';
+    st.classList.toggle('over', outside > 0);
+    controls.update();
+    renderer.render(scene, camera);
+  });
+}
+
+// ---------- タブ ----------
+function show(tab) {
+  for (const t of ['a', 'b', 'c']) document.getElementById(`tab-${t}`).hidden = t !== tab;
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  history.replaceState(null, '', `?tab=${tab}`);
+  if (tab === 'a') drawA();
+  if (tab === 'b') drawB();
+  if (tab === 'c') initC();
+}
+document.querySelectorAll('#tabs button').forEach((b) => (b.onclick = () => show(b.dataset.tab)));
+document.getElementById('range-a').oninput = drawA;
+document.getElementById('range-b').oninput = drawB;
+
+await renderIcons();
+show(new URLSearchParams(location.search).get('tab') || 'a');
+</script>
+</body>
+</html>
