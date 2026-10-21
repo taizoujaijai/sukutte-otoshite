@@ -17,7 +17,7 @@ export const CATEGORIES = [
   {
     key: 'choco', name: 'チョコ', code: ['choco', 'chocoBar'],
     assets: [
-      { name: 'Chocolate Bar', author: 'Quaternius', id: 'vJsJ1EIiOO', uuid: 'c2fe4825-1aed-430d-8925-4541a98d70f8' },
+      { name: 'Chocolate Bar', author: 'Quaternius', id: 'vJsJ1EIiOO', uuid: 'c2fe4825-1aed-430d-8925-4541a98d70f8', local: 'chocolate-bar' },
       { name: 'Chocolate Wrapper', author: 'Kenney', id: '7IPEo5wlOx', uuid: '5ed4ce9f-97ad-4c38-809f-0bd14b6a3519' },
     ],
   },
@@ -25,7 +25,7 @@ export const CATEGORIES = [
     key: 'sweets', name: '新しいお菓子の候補', code: [],
     note: 'コード製にはない種類です。普通の景品を増やすときの候補です。',
     assets: [
-      { name: 'Donut Sprinkles', author: 'Kenney', id: 'RnPNAFyKtY', uuid: '569364fd-8397-4e26-9ff5-2c4909fc6e27' },
+      { name: 'Donut Sprinkles', author: 'Kenney', id: 'RnPNAFyKtY', uuid: '569364fd-8397-4e26-9ff5-2c4909fc6e27', local: 'donut-sprinkles' },
       { name: 'Cupcake', author: 'Quaternius', id: 'XL70IUDIrZ', uuid: '8df5d1ad-dd86-43e9-b03c-3e53398f892c' },
       { name: 'Ice Cream', author: 'Kenney', id: 'oaDwxwtjij', uuid: '74979311-8a4a-4b1b-ba1e-b8b049cd11ea' },
     ],
@@ -33,14 +33,14 @@ export const CATEGORIES = [
   {
     key: 'box', name: '小箱', code: ['smallBox'],
     assets: [
-      { name: 'Present', author: 'CreativeTrio', id: 'LVg3ynJDxa', uuid: 'f040ce00-f0fb-4789-8035-e47db0e1cd1c' },
+      { name: 'Present', author: 'CreativeTrio', id: 'LVg3ynJDxa', uuid: 'f040ce00-f0fb-4789-8035-e47db0e1cd1c', local: 'present' },
     ],
   },
   {
     key: 'gem', name: '宝石', code: ['gemSmall', 'gemLarge'],
     assets: [
-      { name: 'Gem Pink', author: 'Quaternius', id: 'PJnKvWluqs', uuid: '97fcdb07-9d4d-46f2-8c17-392bb61915e6' },
-      { name: 'Gem Blue', author: 'Quaternius', id: 'QgQ4rESqNc', uuid: '60566587-6940-4642-9feb-44a023791fda' },
+      { name: 'Gem Pink', author: 'Quaternius', id: 'PJnKvWluqs', uuid: '97fcdb07-9d4d-46f2-8c17-392bb61915e6', local: 'gem-pink' },
+      { name: 'Gem Blue', author: 'Quaternius', id: 'QgQ4rESqNc', uuid: '60566587-6940-4642-9feb-44a023791fda', local: 'gem-blue' },
       { name: 'Crystal', author: 'iPoly3D', id: 'dxCmHfpqc5', uuid: '8f589a88-1828-4af2-9732-eefde999610f' },
     ],
   },
@@ -72,11 +72,15 @@ export const CATEGORIES = [
     key: 'dino', name: '恐竜マスコット', code: ['trex', 'triceratops'],
     assets: [
       { name: 'T-Rex', author: 'Quaternius', id: 'UYtneO5FpF', uuid: '34eed102-48f0-43dd-bc6f-ef7a6dfddfbb' },
-      { name: 'Triceratops', author: 'Quaternius', id: 'IGvrUqGrRM', uuid: '6aa1f3ff-b9b3-4bb5-9d85-b2ffa514f0cc' },
+      { name: 'Triceratops', author: 'Quaternius', id: 'IGvrUqGrRM', uuid: '6aa1f3ff-b9b3-4bb5-9d85-b2ffa514f0cc', local: 'triceratops' },
       { name: 'Cute Red Dino', author: 'Exceptional_3D', id: 'WAkBnE6ydO', uuid: '26637805-ce66-4fb7-ac0a-2e6b92b21974' },
     ],
   },
-].map((c) => ({ ...c, assets: c.assets.map((a) => ({ ...a, url: GLB(a.uuid), page: PAGE(a.id), license: 'CC0 1.0' })) }));
+].map((c) => ({
+  ...c,
+  // 採用した素材（local があるもの）はリポジトリに取り込んだファイルを読む。ほかの候補は配布元から読む
+  assets: c.assets.map((a) => ({ ...a, url: a.local ? `../public/models/${a.local}.glb` : GLB(a.uuid), page: PAGE(a.id), license: 'CC0 1.0', adopted: !!a.local })),
+}));
 
 // 輪郭線用の材質。頂点を法線方向に押し出して裏面を描く（骨入りのモデルでも形に沿う）
 function outlineMaterial(thickness) {

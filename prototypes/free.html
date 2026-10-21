@@ -40,7 +40,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createRenderer, applyStyle, onResize } from './common.js';
 import { ALL_PRIZES, makePrize, seeded } from './prizes.js?v=2';
-import { CATEGORIES, toonify, setToon, setPastel } from './free-assets.js?v=2';
+import { CATEGORIES, toonify, setToon, setPastel } from './free-assets.js?v=3';
 
 const SIZE = 1.25;      // 並べるときの大きさ
 const OUTLINE = 0.018;  // 輪郭線の太さ（見た目）
@@ -154,7 +154,7 @@ async function show(cat) {
 
   const panel = document.getElementById('panel');
   panel.innerHTML = `<p><b>${cat.name}</b>：左の青い台がコード製、右のピンクの台がフリー素材（CC0）です。${cat.note ?? ''} <span id="loading">読み込み中…</span></p>
-    <ul>${cat.assets.map((a) => `<li>${a.name}（${a.author}・${a.license}）<a href="${a.page}" target="_blank" rel="noopener">配布ページ</a></li>`).join('')}</ul>`;
+    <ul>${cat.assets.map((a) => `<li>${a.adopted ? '★採用 ' : ''}${a.name}（${a.author}・${a.license}）<a href="${a.page}" target="_blank" rel="noopener">配布ページ</a></li>`).join('')}</ul>`;
 
   const xs = cat.assets.map((_, i) => x + i * gap);
   const loaded = await Promise.all(cat.assets.map((a) => loadAsset(a).catch(() => null)));
@@ -168,7 +168,7 @@ async function show(cat) {
     res.root.removeFromParent();
     setToon(res.root, toonOn);
     setPastel(res.root, pastelOn);
-    place(res.root, xs[i], a.name, `${a.author}・CC0`, 'free');
+    place(res.root, xs[i], a.adopted ? `★ ${a.name}` : a.name, `${a.author}・CC0${a.adopted ? '・採用' : ''}`, 'free');
     // 骨入りのモデルは待機のアニメーションを流す
     const idle = res.animations.find((c) => /idle/i.test(c.name));
     if (idle) {
