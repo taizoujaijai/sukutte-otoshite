@@ -1,6 +1,6 @@
 // 筐体の見た目（トゥーン調・8角形）。動く部分（上段・腕・ショベル・川の底）は参照を返す。
 import * as THREE from 'three';
-import { M, ARM, SHOVEL_SCALE } from '../config';
+import { M, ARM, SHOVEL_SCALE, STIR } from '../config';
 import { toonGradient } from '../prizes/catalog';
 
 export const COLORS = {
@@ -296,6 +296,7 @@ export interface MachineVisual {
   river: THREE.Group;
   seats: SeatVisual[];
   hatch: THREE.Group;
+  stirrers: THREE.Mesh[];
 }
 
 export function buildMachineVisual(): MachineVisual {
@@ -342,6 +343,16 @@ export function buildMachineVisual(): MachineVisual {
   rf.position.y = M.riverFloor;
   river.add(rf);
   root.add(river);
+
+  // かき混ぜの仕切り板（位置は毎フレーム game.ts で合わせる）
+  const stirrers: THREE.Mesh[] = [];
+  for (let k = 0; k < 4; k++) {
+    const m = mesh(new THREE.BoxGeometry(STIR.rOut - STIR.rIn, STIR.height + 0.3, 0.1), toon(COLORS.mint));
+    addOutline(m, 0.02);
+    m.visible = false;
+    root.add(m);
+    stirrers.push(m);
+  }
 
   // 中央の島
   const island = mesh(new THREE.CylinderGeometry(M.riverIn, M.riverIn + 0.05, 9.6 - M.bodyTop, 48), toon(COLORS.mint));
@@ -400,5 +411,5 @@ export function buildMachineVisual(): MachineVisual {
   outlined.push(cBase, top);
 
   for (const o of outlined) addOutline(o, 0.06);
-  return { root, river, seats, hatch };
+  return { root, river, seats, hatch, stirrers };
 }

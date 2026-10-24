@@ -110,7 +110,9 @@ export class Chest {
   open(keys: string[]) {
     this.clear();
     this.resize();
-    this.camera.position.set(0, 7.4, 7.8);
+    // 縦長の画面では、箱が横にはみ出さないよう引いて見る
+    const far = this.camera.aspect < 0.8 ? 1.75 : 1;
+    this.camera.position.set(0, 7.4 * far, 7.8 * far);
     this.controls.target.set(0, 1.0, 0);
     this.queue = [...keys];
     // 景品が多いときは、半分ほどを最初に一気に入れて詰まった状態から始める

@@ -38,6 +38,7 @@ async function boot() {
     hud: () => updateHud(),
     collected: (key) => onCollected(key),
     cleared: () => setTimeout(onCleared, 1600),
+    broke: () => onBroke(),
     banner: (text) => { $('banner').textContent = text ?? ''; show('banner', !!text); updateHud(); },
     toast: (text) => {
       $('toast').textContent = text;
@@ -112,10 +113,21 @@ async function boot() {
     $('spent').textContent = String(game.spent);
     $('credit').textContent = String(game.credits);
     ($('btn-coin') as HTMLButtonElement).disabled = !game.canCoin;
-    ($('btn-scoop') as HTMLButtonElement).disabled = !game.canScoop;
-    ($('btn-drop') as HTMLButtonElement).disabled = !game.canDrop;
-    $('btn-scoop').classList.toggle('ready', game.canScoop);
-    $('btn-drop').classList.toggle('ready', game.canDrop);
+    // 「すくう」と「おとす」は1つのボタンで切り替える
+    const phase = game.arms[game.seat].phase;
+    const dropSide = phase === 'waitDrop' || phase === 'dump' || phase === 'hold' || phase === 'reset';
+    const btn = $('btn-action') as HTMLButtonElement;
+    let label = 'すくう', sub = '';
+    if (phase === 'waitDrop') label = 'おとす';
+    else if (dropSide) { label = 'おとす'; sub = 'おとしています…'; }
+    else if (phase !== 'idle') sub = 'すくっています…';
+    else if (game.credits === 0 && game.mode === 'play') sub = 'コインを入れてね';
+    $('btn-action-label').textContent = label;
+    $('btn-action-sub').textContent = sub;
+    btn.classList.toggle('scoop', !dropSide);
+    btn.classList.toggle('drop', dropSide);
+    btn.disabled = !(game.canScoop || game.canDrop);
+    btn.classList.toggle('ready', game.canScoop || game.canDrop);
     ($('btn-onedari') as HTMLButtonElement).disabled = game.cleared;
   }
   function updateTimer() {
@@ -125,18 +137,44 @@ async function boot() {
     $('timer-box').classList.toggle('warn', sec !== null && sec <= 10);
   }
 
-  let specialTimer = 0;
+  // 景品を取ったら「GET!」と出し、取った景品の絵をポンポンとはね出させる。最後に取ってから1秒で消す
+  let getTimer = 0;
   function onCollected(key: string) {
     const def = PRIZE[key];
-    if (def.big || key === 'gemLarge') {
-      ($('special-img') as HTMLImageElement).src = ICONS[key];
-      $('special-label').textContent = def.big ? '大物ゲット！' : '宝石ゲット！';
-      $('special-name').textContent = def.name;
-      show('special');
-      clearTimeout(specialTimer);
-      specialTimer = window.setTimeout(() => show('special', false), 2200);
-    }
+    const icons = $('get-icons');
+    if ($('get').hidden) icons.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = ICONS[key];
+    img.alt = def.name;
+    if (def.big || key === 'gemLarge') img.className = 'big';
+    icons.appendChild(img);
+    while (icons.children.length > 8) icons.firstElementChild.remove();
+    const text = $('get-text');
+    const big = def.big || icons.querySelector('img.big');
+    text.textContent = def.big ? '大物GET!' : big ? text.textContent : 'GET!';
+    text.classList.toggle('big', !!def.big || text.textContent === '大物GET!');
+    // 文字も取るたびにはねさせる
+    text.style.animation = 'none';
+    void text.offsetWidth;
+    text.style.animation = '';
+    show('get');
+    clearTimeout(getTimer);
+    getTimer = window.setTimeout(() => show('get', false), def.big ? 1600 : 1000);
   }
+
+  // お金を使い切ったら、宝箱を開いて取った景品を知らせ、続けるか終わるかを選んでもらう
+  function onBroke() {
+    $('broke-count').textContent = String(progress.box.length);
+    show('broke');
+    openChest();
+  }
+  function closeChest() {
+    chest.close();
+    show('chest', false);
+    show('broke', false);
+  }
+  $('broke-onedari').onclick = () => { closeChest(); game.begOnedari(); };
+  $('broke-end').onclick = () => { closeChest(); game.resetMoney(); toTitle(); updateHud(); };
 
   function onCleared() {
     progress.clears++;
@@ -157,7 +195,7 @@ async function boot() {
     show('chest');
     chest.open(progress.box);
   }
-  $('chest-close').onclick = () => { chest.close(); show('chest', false); };
+  $('chest-close').onclick = closeChest;
 
   function openZukan() {
     const got = PRIZES.filter((p) => (progress.zukan[p.key] ?? 0) > 0).length;
@@ -234,8 +272,8 @@ async function boot() {
   $('seat-ok').onclick = startPlay;
 
   $('btn-coin').onclick = () => game.insertCoin();
-  $('btn-scoop').onclick = () => game.scoop();
-  $('btn-drop').onclick = () => game.drop();
+  const action = () => { if (game.canDrop) game.drop(); else game.scoop(); updateHud(); };
+  $('btn-action').onclick = action;
   $('btn-onedari').onclick = () => game.begOnedari();
   $('btn-chest').onclick = openChest;
   $('btn-camera').onclick = () => game.lookAtSeat(game.seat);
@@ -258,8 +296,7 @@ async function boot() {
   addEventListener('keydown', (e) => {
     if (game.mode !== 'play' || e.repeat) return;
     if (e.code === 'KeyC') game.insertCoin();
-    else if (e.code === 'Space') { e.preventDefault(); game.scoop(); }
-    else if (e.code === 'Enter') game.drop();
+    else if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); action(); }
     else if (e.code === 'KeyR') game.lookAtSeat(game.seat);
   });
 

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { M, MONEY, TIMING, STOCK, PHYSICS, ARM, MOTION } from './config';
 import { buildMachineVisual, MachineVisual } from './machine/visual';
-import { Physics, Prize } from './physics';
+import { Physics, Prize, stirLift, stirPose } from './physics';
 import { Arm, poseVisual, ArmPhase } from './arm';
 import { PRIZE, BIG_KEYS, randomNormalKey, getTemplate } from './prizes/catalog';
 import { Progress, saveProgress, isOverflowing } from './progress';
@@ -18,6 +18,7 @@ export interface GameEvents {
   hud(): void;
   collected(key: string): void;
   cleared(): void;
+  broke(): void;
   banner(text: string | null): void;
   toast(text: string): void;
 }
@@ -45,6 +46,7 @@ export class Game {
   refilling = false;
   paused = false;
   cleared = false;
+  brokeShown = false;   // お金切れを知らせたか
 
   private time = 0;
   private acc = 0;
@@ -233,6 +235,7 @@ export class Game {
 
   begOnedari() {
     this.money += MONEY.onedari;
+    this.brokeShown = false;
     this.onedari++;
     const lines = ['しょうがないなあ', 'はい、どうぞ', 'これで最後だよ', 'もう、しかたないね', '大事に使ってね'];
     this.ev.toast(`「${lines[Math.min(this.onedari - 1, lines.length - 1)]}」 +1000円`);
@@ -286,6 +289,7 @@ export class Game {
   }
 
   resetMoney() {
+    this.brokeShown = false;
     this.money = MONEY.start;
     this.spent = 0;
     this.credits = 0;
@@ -363,6 +367,7 @@ export class Game {
       this.physics.driveShovel(i, a.pose.x, a.pose.y, a.pose.pitch);
       this.physics.driveUpper(i, this.time);
     }
+    this.physics.driveStirrers(this.time);
     this.physics.step();
   }
 
@@ -390,6 +395,12 @@ export class Game {
     }
     this.checkRefill(dt);
 
+    // お金を使い切った：シャッターが閉じて、最後の景品が落ち終わってから知らせる
+    if (this.mode === 'play' && !this.cleared && !this.brokeShown && this.money < MONEY.perPlay && this.credits === 0 && this.armIdle && !this.shutterOpen) {
+      this.brokeShown = true;
+      this.ev.broke();
+    }
+
     this.acc += dt;
     let n = 0;
     while (this.acc >= PHYSICS.step && n < PHYSICS.maxSub) {
@@ -402,6 +413,13 @@ export class Game {
     // 見た目を合わせる
     this.physics.sync();
     this.machine.river.rotation.y = (this.time * Math.PI * 2) / MOTION.riverPeriod;
+    const lift = stirLift(this.time);
+    this.machine.stirrers.forEach((m, k) => {
+      const p = stirPose(k, lift);
+      m.position.set(p.x, p.y, p.z);
+      m.quaternion.copy(p.rot);
+      m.visible = lift > 0;
+    });
     this.machine.seats.forEach((s, i) => {
       s.upper.position.x = this.physics.upperOffset(i, this.time);
       poseVisual(s, this.arms[i].pose);

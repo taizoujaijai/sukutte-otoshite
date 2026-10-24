@@ -2,7 +2,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { M, MOTION, PHYSICS, SHOVEL_SCALE } from './config';
+import { M, MOTION, PHYSICS, SHOVEL_SCALE, STIR } from './config';
 import { octFactor } from './machine/visual';
 import { PRIZE, getTemplate, Template, scaleOf } from './prizes/catalog';
 import { Instancer } from './prizes/instancer';
@@ -27,11 +27,36 @@ const FRICTION = { prize: 0.45, stage: 0.35, shovel: 0.6, river: 0.8 };
 const seatQuat = (i: number) => new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -i * Math.PI / 2, 0));
 const q = (x: number, y: number, z: number) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
 
+// かき混ぜの板：上がり具合（0 = 沈んでいる、1 = 上がりきっている）
+export function stirLift(t: number) {
+  const { every, rise, hold } = STIR;
+  const u = t % every;
+  if (u < rise) return u / rise;
+  if (u < rise + hold) return 1;
+  if (u < rise * 2 + hold) return 1 - (u - rise - hold) / rise;
+  return 0;
+}
+export const stirLen = () => STIR.rOut - STIR.rIn;
+// k 番目の板の位置と向き（斜め45度の方向に置き、放射方向から STIR.angle だけ傾ける）
+export function stirPose(k: number, lift: number) {
+  const a = Math.PI / 4 + (k * Math.PI) / 2;
+  const rc = (STIR.rIn + STIR.rOut) / 2;
+  const h = STIR.height + 0.3;
+  const y = M.riverFloor - 0.3 - h / 2 + lift * h + 0.01;
+  return {
+    x: Math.cos(a) * rc,
+    y,
+    z: Math.sin(a) * rc,
+    rot: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -(a + STIR.angle), 0)),
+  };
+}
+
 export class Physics {
   world: RAPIER.World;
   prizes: Prize[] = [];
   uppers: RAPIER.RigidBody[] = [];
   shovels: RAPIER.RigidBody[] = [];
+  stirrers: RAPIER.RigidBody[] = [];
   // 物理で上段を動かす席。遊んでいない席の上段は見た目だけ動かし、景品は眠らせて計算を省く
   activeSeat = -1;
   onSlot: (seat: number, p: Prize) => void = () => {};
@@ -74,6 +99,14 @@ export class Physics {
     this.world.createCollider(RAPIER.ColliderDesc.cylinder(0.5, M.riverOut + 0.6).setFriction(FRICTION.river), river);
     // 中央の島
     this.world.createCollider(RAPIER.ColliderDesc.cylinder(1.5, M.riverIn).setTranslation(0, M.riverFloor + 1.5, 0), this.fixed);
+
+    // かき混ぜの仕切り板（席と席のあいだ。ふだんは川底の下に沈んでいる）
+    for (let k = 0; k < 4; k++) {
+      const pose = stirPose(k, 0);
+      const b = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(pose.x, pose.y, pose.z).setRotation(pose.rot));
+      this.world.createCollider(RAPIER.ColliderDesc.cuboid(stirLen() / 2, (STIR.height + 0.3) / 2, 0.05).setFriction(0.2), b);
+      this.stirrers.push(b);
+    }
 
     // デッキの坂：8角形に並べた8枚の傾いた板（滑りやすい）。内側の端が川の縁の段差になる
     const r0 = M.riverOut, r1 = M.apothem + 0.3;
@@ -208,6 +241,16 @@ export class Physics {
     const t = this.shovelTarget(i, x, y, pitch);
     this.shovels[i].setNextKinematicTranslation(t.pos);
     this.shovels[i].setNextKinematicRotation(t.rot);
+  }
+
+  // かき混ぜの板を動かす（t はゲームの時刻）
+  driveStirrers(t: number) {
+    const lift = stirLift(t);
+    this.stirrers.forEach((b, k) => {
+      const p = stirPose(k, lift);
+      b.setNextKinematicTranslation({ x: p.x, y: p.y, z: p.z });
+      b.setNextKinematicRotation(p.rot);
+    });
   }
 
   driveUpper(i: number, t: number) {
