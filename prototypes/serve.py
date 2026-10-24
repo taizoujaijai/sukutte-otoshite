@@ -1,5 +1,5 @@
 # 試作ページ用の簡易サーバー。ファイルを直したらすぐ反映されるよう、ブラウザにキャッシュさせない。
-# リポジトリ全体を配信する（試作は /prototypes/、素材は /public/ から読む）。
+# リポジトリ全体を配信する（試作は /prototypes/、素材は /assets/ から読む）。
 # 使い方: python serve.py [ポート番号]
 import functools
 import http.server

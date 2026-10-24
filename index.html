@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>すくっておとしてスペシャル</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&family=Mochiy+Pop+One&display=swap">
+</head>
+<body>
+<div id="app">
+  <div id="view"></div>
+
+  <!-- プレイ中の表示 -->
+  <div id="hud" hidden>
+    <div class="hud-top">
+      <div class="wallet">
+        <div class="stat"><span class="label">持ち金</span><span class="num" id="money">1000</span><span class="unit">円</span></div>
+        <div class="stat sub"><span class="label">使った</span><span class="num" id="spent">0</span><span class="unit">円</span></div>
+      </div>
+      <div class="top-buttons">
+        <button id="btn-onedari" class="chip">おねだり</button>
+        <button id="btn-chest" class="chip">景品を見る</button>
+        <button id="btn-camera" class="chip">席に戻る</button>
+        <button id="btn-menu" class="chip icon" aria-label="メニュー">≡</button>
+      </div>
+    </div>
+    <div class="hud-bottom">
+      <div class="coin-row">
+        <button id="btn-coin" class="coin">コインを入れる<small>100円</small></button>
+        <div class="credit" aria-label="クレジット"><span class="seg-label">CREDIT</span><span class="seg" id="credit">0</span></div>
+        <div class="timer" id="timer-box"><span id="timer-label">すくう</span><span class="seg small" id="timer">--</span></div>
+      </div>
+      <div class="play-row">
+        <button id="btn-scoop" class="big scoop">すくう</button>
+        <button id="btn-drop" class="big drop">おとす</button>
+      </div>
+    </div>
+    <div id="banner" hidden></div>
+    <div id="toast" hidden></div>
+  </div>
+
+  <!-- 席選び -->
+  <div id="select" class="layer" hidden>
+    <div class="select-top">
+      <h2>席をえらぶ</h2>
+      <p id="seat-desc"></p>
+      <p class="hint">左右にスワイプして、ほかの席を見る</p>
+    </div>
+    <div class="select-bottom">
+      <button id="seat-prev" class="round" aria-label="前の席">◀</button>
+      <button id="seat-ok" class="primary">この席にする</button>
+      <button id="seat-next" class="round" aria-label="次の席">▶</button>
+    </div>
+  </div>
+
+  <!-- タイトル -->
+  <div id="title" class="layer center" hidden>
+    <h1 class="logo"><span>すくって</span><span>おとして</span><span class="sp">スペシャル</span></h1>
+    <div class="menu">
+      <button id="t-start" class="primary">はじめる</button>
+      <button id="t-chest">景品を見る</button>
+      <button id="t-zukan">図鑑</button>
+      <button id="t-howto">あそびかた</button>
+      <button id="t-settings">設定</button>
+    </div>
+  </div>
+
+  <!-- 読み込み中 -->
+  <div id="loading" class="layer center">
+    <h1 class="logo small"><span>すくって</span><span>おとして</span><span class="sp">スペシャル</span></h1>
+    <p id="loading-text">台を準備しています…</p>
+  </div>
+
+  <!-- メニュー -->
+  <div id="menu" class="sheet" hidden>
+    <div class="panel">
+      <h2>メニュー</h2>
+      <div class="menu">
+        <button id="m-seat">席を移る</button>
+        <button id="m-zukan">図鑑</button>
+        <button id="m-howto">あそびかた</button>
+        <button id="m-settings">設定</button>
+        <button id="m-title">タイトルへ</button>
+        <button id="m-close" class="primary">とじる</button>
+      </div>
+      <p class="note" id="m-note"></p>
+    </div>
+  </div>
+
+  <!-- 図鑑 -->
+  <div id="zukan" class="sheet" hidden>
+    <div class="panel wide">
+      <div class="panel-head"><h2>図鑑</h2><span id="zukan-count"></span><button class="close" data-close="zukan">とじる</button></div>
+      <div class="zukan-grid" id="zukan-grid"></div>
+    </div>
+  </div>
+
+  <!-- あそびかた -->
+  <div id="howto" class="sheet" hidden>
+    <div class="panel">
+      <div class="panel-head"><h2>あそびかた</h2><button class="close" data-close="howto">とじる</button></div>
+      <ol class="steps">
+        <li><b>コインを入れる</b>　1回100円。何枚か先に入れて、続けて遊べます（9枚まで）。</li>
+        <li><b>すくう</b>　腕が伸びて、川を流れる景品を横向きにすくいます。腕が川に届くまで約2秒。流れてくる景品を見て、早めに押しましょう。</li>
+        <li><b>おとす</b>　すくった景品を、前後に動く台（上段）に落とします。</li>
+        <li><b>獲得口へ</b>　上段に押された景品が下段から手前に落ちると、あなたのものです。</li>
+        <li><b>宝箱があふれたらクリア</b>　取った景品は宝箱に詰まります。箱からあふれるまで取れたらクリア！</li>
+      </ol>
+      <p class="note">60秒押さないと、自動で「すくう」「おとす」をします。お金がなくなったら「おねだり」すると1000円もらえます。</p>
+    </div>
+  </div>
+
+  <!-- 設定 -->
+  <div id="settings" class="sheet" hidden>
+    <div class="panel">
+      <div class="panel-head"><h2>設定</h2><button class="close" data-close="settings">とじる</button></div>
+      <label class="row" for="set-volume">音量 <input type="range" id="set-volume" min="0" max="1" step="0.05" value="0.7"></label>
+      <label class="row" for="set-mute">ミュート <input type="checkbox" id="set-mute"></label>
+      <div class="row">画質
+        <div class="seg-buttons" id="set-quality">
+          <button data-q="high">高</button><button data-q="mid">中</button><button data-q="low">低</button>
+        </div>
+      </div>
+      <div class="row danger">
+        <button id="set-reset">データを消す</button>
+      </div>
+      <div id="reset-confirm" class="confirm" hidden>
+        <p>宝箱、図鑑、出るようになった大物をすべて消します。元には戻せません。</p>
+        <div class="confirm-buttons"><button id="reset-yes" class="danger-button">消す</button><button id="reset-no">やめる</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 宝箱 -->
+  <div id="chest" class="sheet full" hidden>
+    <div id="chest-view"></div>
+    <div class="chest-head">
+      <h2>宝箱</h2>
+      <span id="chest-status"></span>
+      <button class="close" id="chest-close">とじる</button>
+    </div>
+  </div>
+
+  <!-- 獲得の特別演出 -->
+  <div id="special" class="layer center special" hidden>
+    <div class="burst"></div>
+    <img id="special-img" alt="">
+    <p class="special-text"><span id="special-label">大物ゲット！</span><b id="special-name"></b></p>
+  </div>
+
+  <!-- クリア -->
+  <div id="clear" class="sheet" hidden>
+    <div class="panel">
+      <h2 class="clear-title">宝箱があふれた！</h2>
+      <p class="clear-sub">クリアおめでとう</p>
+      <dl class="results">
+        <div><dt>使った金額</dt><dd id="r-spent"></dd></div>
+        <div><dt>おねだり</dt><dd id="r-onedari"></dd></div>
+        <div><dt>取った景品</dt><dd id="r-count"></dd></div>
+      </dl>
+      <div class="unlock" id="r-unlock"></div>
+      <div class="menu">
+        <button id="c-chest">あふれた宝箱を見る</button>
+        <button id="c-again" class="primary">もう一度遊ぶ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="fps" hidden></div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

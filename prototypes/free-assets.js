@@ -79,7 +79,7 @@ export const CATEGORIES = [
 ].map((c) => ({
   ...c,
   // 採用した素材（local があるもの）はリポジトリに取り込んだファイルを読む。ほかの候補は配布元から読む
-  assets: c.assets.map((a) => ({ ...a, url: a.local ? `../public/models/${a.local}.glb` : GLB(a.uuid), page: PAGE(a.id), license: 'CC0 1.0', adopted: !!a.local })),
+  assets: c.assets.map((a) => ({ ...a, url: a.local ? `../assets/models/${a.local}.glb` : GLB(a.uuid), page: PAGE(a.id), license: 'CC0 1.0', adopted: !!a.local })),
 }));
 
 // 輪郭線用の材質。頂点を法線方向に押し出して裏面を描く（骨入りのモデルでも形に沿う）
