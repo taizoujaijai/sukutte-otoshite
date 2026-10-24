@@ -215,7 +215,7 @@ export class Game {
   get armIdle() { return this.arms[this.seat].phase === 'idle'; }
   get canScoop() { return this.mode === 'play' && this.credits > 0 && this.armIdle && !this.cleared; }
   get canDrop() { return this.mode === 'play' && this.arms[this.seat].phase === 'waitDrop'; }
-  get canCoin() { return this.mode === 'play' && this.money >= MONEY.perPlay && this.credits < MONEY.maxCredit && !this.refilling && !this.cleared; }
+  get canCoin() { return this.mode === 'play' && this.money >= MONEY.perPlay && this.credits < MONEY.maxCredit && !this.cleared; }
   get canChangeSeat() { return this.mode === 'play' && this.armIdle; }
 
   insertCoin() {
@@ -313,30 +313,42 @@ export class Game {
   }
 
   // ---- 補充 ----
+  // 川の景品が減ったら、ドームの上のハッチが開いて、元の数に戻るまで景品が少しずつ降ってくる
   private refillT = 0;
   private refillLeft = 0;
+  private refillCheck = 0;
+  private spawnAcc = 0;
   private checkRefill(h: number) {
+    const hatch = this.machine.hatch;
     if (!this.refilling) {
-      if (this.physics.riverCount() < STOCK.river * STOCK.refillBelow && this.armIdle) {
+      // ハッチを閉じる
+      hatch.position.y += (14.3 - hatch.position.y) * Math.min(1, h * 4);
+      this.refillCheck -= h;
+      if (this.refillCheck > 0) return;
+      this.refillCheck = 1;
+      const n = this.physics.riverCount();
+      if (n < STOCK.river * STOCK.refillBelow) {
         this.refilling = true;
-        this.refillLeft = STOCK.river - this.physics.riverCount();
+        this.refillLeft = STOCK.river - n;
         this.refillT = 0;
-        this.ev.banner('ただいま補充中');
+        this.spawnAcc = 0;
+        if (this.mode === 'play') this.ev.toast('景品を補充しています');
       }
       return;
     }
     this.refillT += h;
-    // ハッチが開き、景品が降る
-    this.machine.hatch.position.y = 14.3 + Math.min(this.refillT, 0.6) * 2.5;
-    if (this.refillT > 0.6 && this.refillLeft > 0 && Math.random() < 0.5) {
-      this.spawnRiver(1, 12.5, 0.5);
+    // ハッチが開いてから降らせる
+    hatch.position.y += (15.8 - hatch.position.y) * Math.min(1, h * 4);
+    if (this.refillT < 0.6) return;
+    this.spawnAcc += h * STOCK.refillRate;
+    while (this.spawnAcc >= 1 && this.refillLeft > 0) {
+      this.spawnRiver(1, 12.5, 0.6);
+      this.spawnAcc -= 1;
       this.refillLeft--;
     }
-    if (this.refillLeft <= 0 && this.refillT > 3) {
-      this.machine.hatch.position.y = 14.3;
+    if (this.refillLeft <= 0) {
       this.refilling = false;
-      this.ev.banner(null);
-      this.ev.hud();
+      this.refillCheck = 3; // 降った景品が川に落ち着くまで、次の確認を待つ
     }
   }
 

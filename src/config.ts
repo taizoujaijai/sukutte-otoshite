@@ -59,7 +59,8 @@ export const ARM = {
 
 export const STOCK = {
   river: 140,           // 川の景品の数
-  refillBelow: 0.5,     // 最初の量のこの割合を下回ったら補充
+  refillBelow: 0.85,    // 最初の量のこの割合を下回ったら補充（上から降らせる）
+  refillRate: 12,       // 補充で1秒に降らせる数
   lower: 24,
   upper: 12,
   towerChance: 0.25,
