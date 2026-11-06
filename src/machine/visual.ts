@@ -132,8 +132,8 @@ function riverTexture() {
 export const BLADE_DROP = 0.4;
 function buildShovel() {
   const g = new THREE.Group();
-  const blade = new THREE.MeshToonMaterial({ color: '#cfeeff', gradientMap: toonGradient(), transparent: true, opacity: 0.55 });
-  const edge = toon('#7cc4f0');
+  const blade = toon('#5aa7e8');   // 透明にせず、はっきり見える色にする
+  const edge = toon('#2f7dcc');
   const body = new THREE.Group();
   body.position.y = -BLADE_DROP;
   g.add(body);
@@ -173,7 +173,72 @@ export interface SeatVisual {
   upperArm: THREE.Mesh;
   foreArm: THREE.Mesh;
   display: SevenSeg;
-  flap: THREE.Mesh;
+  shutter: THREE.Mesh;      // 閉じているときに穴をふさぐ板
+  button: MachineButton;
+}
+
+// 台の上の大きなボタン（「すくう」と「おとす」を切り替える）。タップ／クリックで押す
+export type ButtonState = 'scoop' | 'drop' | 'off';
+const BUTTON_COLORS: Record<ButtonState, string> = { scoop: '#3d8bff', drop: '#ff5f9e', off: '#b9b3bd' };
+
+export class MachineButton {
+  group = new THREE.Group();
+  hit: THREE.Mesh;          // 押しやすいよう、見た目より少し大きい当たり判定
+  private cap: THREE.Mesh;
+  private label: THREE.Mesh;
+  private labels: Record<'scoop' | 'drop', THREE.Material>;
+  private pressT = 0;
+  state: ButtonState = 'off';
+
+  constructor() {
+    const base = mesh(new THREE.CylinderGeometry(0.95, 1.0, 0.12, 32), toon('#3a2a3a'));
+    this.group.add(base);
+    this.cap = mesh(new THREE.CylinderGeometry(0.8, 0.86, 0.22, 32), toon(BUTTON_COLORS.off));
+    this.cap.position.y = 0.17;
+    this.group.add(this.cap);
+    const labelMat = (text: string) => new THREE.MeshBasicMaterial({ map: circleLabel(text), transparent: true });
+    this.labels = { scoop: labelMat('すくう'), drop: labelMat('おとす') };
+    this.label = new THREE.Mesh(new THREE.CircleGeometry(0.72, 32), this.labels.scoop);
+    this.label.rotation.x = -Math.PI / 2;
+    this.label.rotation.z = Math.PI / 2;    // 席の側から読める向き
+    this.label.position.y = 0.285;
+    this.group.add(this.label);
+    this.hit = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.25, 0.9, 16), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+    this.hit.position.y = 0.2;
+    this.group.add(this.hit);
+  }
+
+  set(state: ButtonState, ready: boolean, t: number, labelSide: 'scoop' | 'drop') {
+    if (state !== this.state) {
+      this.state = state;
+      this.cap.material = toon(BUTTON_COLORS[state]);
+    }
+    this.label.material = this.labels[labelSide];
+    // 押せるときは、ふくらんで知らせる
+    const pulse = ready ? 1 + Math.sin(t * 6) * 0.05 : 1;
+    this.cap.scale.set(pulse, 1, pulse);
+    this.label.scale.set(pulse, pulse, 1);
+    const press = this.pressT > 0 ? 0.12 : 0;
+    this.pressT = Math.max(0, this.pressT - 1 / 60);
+    this.cap.position.y = 0.17 - press;
+    this.label.position.y = 0.285 - press;
+  }
+
+  press() { this.pressT = 0.15; }
+}
+
+function circleLabel(text: string) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 256;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 72px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 132);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 function buildSeat(i: number): SeatVisual {
@@ -210,8 +275,8 @@ function buildSeat(i: number): SeatVisual {
   g.add(upper);
   // 上段を支えるレール（下段から川の上へ張り出す）
   for (const s of [-1, 1]) {
-    const rail = mesh(new THREE.BoxGeometry(2.2, 0.16, 0.16), leg);
-    rail.position.set(M.lowerIn - 1.0, M.lowerTop - 0.08, s * (M.stageW / 2 + 0.1));
+    const rail = mesh(new THREE.BoxGeometry(1.4, 0.16, 0.16), leg);
+    rail.position.set(M.lowerIn - 0.5, M.lowerTop - 0.08, s * (M.stageW / 2 + 0.1));
     g.add(rail);
   }
   // 上段の奥の固定の壁（上段が引っ込むとき、上段の景品を手前へ押し出す）
@@ -225,10 +290,16 @@ function buildSeat(i: number): SeatVisual {
     gd.position.set((M.upperIn + M.upperOut) / 2, M.upperTop + 0.4, s * (M.stageW / 2 + 0.02));
     g.add(gd);
   }
-  // 獲得口へ落ちる穴
-  const slot = mesh(new THREE.BoxGeometry(0.16, 0.06, M.stageW), toon('#2a2030'), false);
-  slot.position.set(M.lowerOut + 0.08, M.deckOut + 0.01, 0);
+  // 下段の手前の穴（ここから取り出し口へ落ちる）と、閉じているときにふさぐ板
+  const holeW = M.stageW + 0.4;
+  const holeDepth = M.domeR - M.lowerOut;
+  const holeY = M.deckOut + 0.08;
+  const slot = mesh(new THREE.BoxGeometry(holeDepth, 0.06, holeW), toon('#2a2030'), false);
+  slot.position.set(M.lowerOut + holeDepth / 2, holeY, 0);
   g.add(slot);
+  const shutter = mesh(new THREE.BoxGeometry(holeDepth, 0.05, holeW), toon(COLORS.stageEdge), false);
+  shutter.position.set(M.lowerOut + holeDepth / 2, holeY + 0.05, 0);
+  g.add(shutter);
 
   // 腕
   const frame = toon(COLORS.sky);
@@ -257,38 +328,58 @@ function buildSeat(i: number): SeatVisual {
   const shovel = buildShovel();
   g.add(shovel);
 
-  // 席の正面：獲得口、7セグ、ボタン
+  // 席の正面：取り出し口、7セグ、ボタン
   const face = new THREE.Group();
   face.position.set(M.apothem + 0.01, 0, 0);
-  const win = mesh(new THREE.BoxGeometry(0.1, 1.6, 3.0), toon('#2a2030'), false);
-  win.position.set(0, 3.6, 0);
-  face.add(win);
-  const flap = mesh(new THREE.BoxGeometry(0.06, 1.5, 2.9), glass(0.5), false);
-  flap.position.set(0.08, 3.6, 0);
-  face.add(flap);
-  const fr = mesh(new THREE.BoxGeometry(0.16, 1.9, 3.3), toon(COLORS.trim));
-  fr.position.set(-0.04, 3.6, 0);
-  face.add(fr);
-  const panel = mesh(new THREE.BoxGeometry(0.9, 0.25, 3.6), toon(COLORS.trim));
-  panel.position.set(0.35, 6.2, 0);
+  // 取り出し口：筐体から手前へ出っ張った箱。中は暗く、手前は透明なふた
+  const trayH = M.chuteTop - M.chuteFloor + 0.6;
+  const trayY = (M.chuteTop + M.chuteFloor - 0.6) / 2;
+  const trayW = M.stageW + 0.5;
+  const D = M.trayDepth;
+  const back = mesh(new THREE.BoxGeometry(0.06, trayH, trayW), toon('#2a2030'), false);
+  back.position.set(0.03, trayY, 0);
+  face.add(back);
+  const trim = toon(COLORS.trim);
+  const roof = mesh(new THREE.BoxGeometry(D + 0.1, 0.14, trayW + 0.2), trim);
+  roof.position.set(D / 2, M.chuteTop + 0.07, 0);
+  face.add(roof);
+  addOutline(roof, 0.03);
+  const under = mesh(new THREE.BoxGeometry(D + 0.1, 0.5, trayW + 0.2), trim);
+  under.position.set(D / 2, M.chuteFloor - 0.55, 0);
+  face.add(under);
+  addOutline(under, 0.03);
+  for (const s of [-1, 1]) {
+    const w = mesh(new THREE.BoxGeometry(D + 0.1, trayH, 0.1), trim);
+    w.position.set(D / 2, trayY, s * (trayW / 2 + 0.05));
+    face.add(w);
+  }
+  const ramp = mesh(new THREE.BoxGeometry(D + 0.3, 0.06, trayW), toon('#4a3a50'), false);
+  ramp.position.set(D / 2, M.chuteFloor + 0.42, 0);
+  ramp.rotation.z = Math.atan2(M.chuteFloor - 4.7, D + M.domeR - M.lowerOut);
+  face.add(ramp);
+  const lid = mesh(new THREE.BoxGeometry(0.05, trayH, trayW), glass(0.22), false);
+  lid.position.set(D + 0.03, trayY, 0);
+  face.add(lid);
+  const takeLabel = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 0.3), new THREE.MeshBasicMaterial({ map: textTexture(['とりだしぐち'], 384, 64, '#fff1d6', '#5a3a4a', 'bold 40px sans-serif') }));
+  takeLabel.rotation.y = Math.PI / 2;
+  takeLabel.position.set(D + 0.07, M.chuteFloor - 0.55, 0);
+  face.add(takeLabel);
+  // 操作盤とボタン
+  const panel = mesh(new THREE.BoxGeometry(2.3, 0.25, 4.2), trim);
+  panel.position.set(1.1, 6.2, 0);
   face.add(panel);
+  addOutline(panel, 0.03);
   const display = new SevenSeg();
   const disp = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.55), new THREE.MeshBasicMaterial({ map: display.texture }));
   disp.rotation.y = Math.PI / 2;
-  disp.position.set(0.12, 6.75, 0);
+  disp.position.set(0.02, 6.72, 1.55);
   face.add(disp);
-  for (const [color, label, z] of [['#3d8bff', 'すくう', 0.8], ['#ff5f9e', 'おとす', -0.8]] as const) {
-    const btn = mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.15, 24), toon(color));
-    btn.position.set(0.45, 6.38, z);
-    face.add(btn);
-    const lab = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.2), new THREE.MeshBasicMaterial({ map: textTexture([label], 256, 64, '#fff1d6', '#5a3a4a', 'bold 40px sans-serif') }));
-    lab.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-    lab.position.set(0.72, 6.33, z);
-    face.add(lab);
-  }
+  const button = new MachineButton();
+  button.group.position.set(1.15, 6.33, 0);
+  face.add(button.group);
   g.add(face);
 
-  return { group: g, upper, shovel, elbow, wrist, upperArm, foreArm, display, flap };
+  return { group: g, upper, shovel, elbow, wrist, upperArm, foreArm, display, shutter, button };
 }
 
 export interface MachineVisual {
@@ -359,10 +450,8 @@ export function buildMachineVisual(): MachineVisual {
   island.position.y = (9.6 + M.bodyTop) / 2;
   const cap = mesh(new THREE.CylinderGeometry(M.riverIn + 0.15, M.riverIn + 0.15, 0.2, 48), toon(COLORS.rim));
   cap.position.y = 9.7;
-  const ball = mesh(new THREE.SphereGeometry(0.6, 32, 16), toon(COLORS.rim));
-  ball.position.y = 10.4;
-  root.add(island, cap, ball);
-  outlined.push(island, cap, ball);
+  root.add(island, cap);
+  outlined.push(island, cap);
 
   const seats = [0, 1, 2, 3].map((i) => buildSeat(i));
   seats.forEach((s) => root.add(s.group));
@@ -379,17 +468,18 @@ export function buildMachineVisual(): MachineVisual {
   }
 
   // ドーム
-  const dome = mesh(lathe([[6.85, M.deckOut], [6.85, M.domeTop], [6.6, 12.5], [5.8, 13.3], [4.4, 13.9], [2.6, 14.25], [1.0, 14.35]]), glass(0.1), false, false);
+  const R = M.domeR;
+  const dome = mesh(lathe([[R, M.deckOut], [R, M.domeTop], [R * 0.96, 12.5], [R * 0.85, 13.3], [R * 0.64, 13.9], [R * 0.38, 14.25], [1.0, 14.35]]), glass(0.1), false, false);
   dome.renderOrder = 10;
   root.add(dome);
   for (let k = 0; k < 8; k++) {
     const a = Math.PI / 8 + k * Math.PI / 4;
-    const r = 6.85 * octFactor(a);
+    const r = M.domeR * octFactor(a);
     const post = mesh(new THREE.CylinderGeometry(0.14, 0.14, M.domeTop - M.deckOut, 12), toon(COLORS.trim));
     post.position.set(Math.cos(a) * r, (M.domeTop + M.deckOut) / 2, Math.sin(a) * r);
     root.add(post);
   }
-  const ring = mesh(lathe([[6.95, 11.5], [6.95, 11.75]]), toon(COLORS.rim));
+  const ring = mesh(lathe([[M.domeR + 0.1, 11.5], [M.domeR + 0.1, 11.75]]), toon(COLORS.rim));
   (ring.material as THREE.Material).side = THREE.DoubleSide;
   root.add(ring);
 

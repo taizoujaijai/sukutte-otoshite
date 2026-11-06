@@ -6,7 +6,7 @@ import { PRIZE, makePrizeObject, toonGradient } from './prizes/catalog';
 import { addOutline } from './machine/visual';
 
 // 箱の内寸。景品の「かさ」の合計が容量（config の CHEST_CAPACITY）に届くころ、あふれ始める大きさ
-const W = 4.6, D = 2.7, H = 1.8, T = 0.12;
+const W = 3.4, D = 2.0, H = 1.3, T = 0.12;
 
 export class Chest {
   private renderer: THREE.WebGLRenderer;
@@ -77,7 +77,7 @@ export class Chest {
     wall(W / 2 + T, H / 2, T / 2, 0, H / 2 + T, -D / 2 - T / 2);
     wall(T / 2, H / 2, D / 2, W / 2 + T / 2, H / 2 + T, 0);
     wall(T / 2, H / 2, D / 2, -W / 2 - T / 2, H / 2 + T, 0);
-    for (const x of [-1.3, 1.3]) {
+    for (const x of [-0.95, 0.95]) {
       const band = new THREE.Mesh(new THREE.BoxGeometry(0.18, H + T + 0.02, D + T * 2 + 0.04), gold);
       band.position.set(x, (H + T) / 2, 0);
       s.add(band);
@@ -112,7 +112,7 @@ export class Chest {
     this.resize();
     // 縦長の画面では、箱が横にはみ出さないよう引いて見る
     const far = this.camera.aspect < 0.8 ? 1.75 : 1;
-    this.camera.position.set(0, 7.4 * far, 7.8 * far);
+    this.camera.position.set(0, 5.6 * far, 5.9 * far);
     this.controls.target.set(0, 1.0, 0);
     this.queue = [...keys];
     // 景品が多いときは、半分ほどを最初に一気に入れて詰まった状態から始める

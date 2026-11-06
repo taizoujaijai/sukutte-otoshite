@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { M, MOTION, PHYSICS, SHOVEL_SCALE, STIR } from './config';
 import { octFactor } from './machine/visual';
-import { PRIZE, getTemplate, Template, scaleOf } from './prizes/catalog';
+import { PRIZE, getTemplate, Template } from './prizes/catalog';
 import { Instancer } from './prizes/instancer';
 import { seatToWorld, worldToSeat } from './util';
 
@@ -20,6 +20,8 @@ export interface Prize {
   body: RAPIER.RigidBody;
   template: Template;
   obj: THREE.Object3D | null;   // 骨入りのモデルだけ個別に描く
+  chuteT: number;               // 通り道に入ってからの秒数
+  removeAt: number;             // 取り出し口に届いたあと、消す時刻（0 ならまだ）
 }
 
 const FRICTION = { prize: 0.45, stage: 0.35, shovel: 0.6, river: 0.8 };
@@ -60,6 +62,8 @@ export class Physics {
   // 物理で上段を動かす席。遊んでいない席の上段は見た目だけ動かし、景品は眠らせて計算を省く
   activeSeat = -1;
   onSlot: (seat: number, p: Prize) => void = () => {};
+  // その席のシャッターが開いているか。閉じていれば、落ちた景品は機械が回収する
+  collecting: (seat: number) => boolean = () => false;
   onLost: (p: Prize) => void = () => {};
   private nextId = 1;
   private stepCount = 0;
@@ -86,9 +90,9 @@ export class Physics {
   }
 
   // 席の座標で箱を置く
-  private seatBox(i: number, half: [number, number, number], pos: [number, number, number]) {
+  private seatBox(i: number, half: [number, number, number], pos: [number, number, number], tiltZ = 0, slippery = false) {
     const [wx, wz] = seatToWorld(i, pos[0], pos[2]);
-    this.box(half, [wx, pos[1], wz], seatQuat(i));
+    this.box(half, [wx, pos[1], wz], seatQuat(i).multiply(q(0, 0, tiltZ)), slippery ? 0 : FRICTION.stage, slippery);
   }
 
   private buildStatic() {
@@ -108,38 +112,39 @@ export class Physics {
       this.stirrers.push(b);
     }
 
-    // デッキの坂：8角形に並べた8枚の傾いた板（滑りやすい）。内側の端が川の縁の段差になる
-    const r0 = M.riverOut, r1 = M.apothem + 0.3;
-    const y0 = M.deckIn, y1 = M.deckOut + 0.02;
-    const len = Math.hypot(r1 - r0, y1 - y0);
-    const tilt = Math.atan2(y1 - y0, r1 - r0);
+    // デッキの坂：8角形に並べた8枚の傾いた板（滑りやすい）。内側の端が川の縁の段差になる。
+    // 席の正面の板は、下段の手前で切ってある（そこが取り出し口へ落ちる穴）
+    const r0 = M.riverOut, slope = (M.deckOut - M.deckIn) / (M.apothem + 0.2 - r0);
+    const tilt = Math.atan(slope);
     const T = 0.3;
+    const edgeR = M.apothem + 0.3;
     for (let k = 0; k < 8; k++) {
       const a = (k * Math.PI) / 4;
+      const r1 = k % 2 === 0 ? M.lowerOut : edgeR;
+      const y0 = M.deckIn, y1 = M.deckIn + (r1 - r0) * slope;
+      const len = Math.hypot(r1 - r0, y1 - y0);
       const rot = q(0, -a, 0).multiply(q(0, 0, tilt));
       const rm = (r0 + r1) / 2 + Math.sin(tilt) * T;
       const ym = (y0 + y1) / 2 - Math.cos(tilt) * T;
-      const halfW = r1 * Math.tan(Math.PI / 8) + 0.05;
+      const halfW = edgeR * Math.tan(Math.PI / 8) + 0.05;
       this.box([len / 2, T, halfW], [Math.cos(a) * rm, ym, Math.sin(a) * rm], rot, 0, true);
     }
 
-    // ドームの壁（8角形）と仕切り
-    const side = 2 * 6.85 * Math.tan(Math.PI / 8);
+    // ドームの壁（8角形）と仕切り。席の正面の壁は、取り出し口の天井まで下ろす
+    const side = 2 * M.domeR * Math.tan(Math.PI / 8);
+    const wallR = M.domeR + 0.1;
     for (let k = 0; k < 8; k++) {
       const a = (k * Math.PI) / 4;
-      if (k % 2 === 0) {
-        // 席の正面：下段の手前は獲得口へ落ちる口なので、壁は下段より上だけにする
-        const y0 = M.lowerTop + 1.3, y1 = M.domeTop;
-        this.box([0.1, (y1 - y0) / 2, side / 2 + 0.1], [Math.cos(a) * 6.95, (y0 + y1) / 2, Math.sin(a) * 6.95], q(0, -a, 0));
-      } else {
-        this.box([0.1, 2.6, side / 2 + 0.1], [Math.cos(a) * 6.95, M.deckOut + 2, Math.sin(a) * 6.95], q(0, -a, 0));
-      }
+      const y0 = k % 2 === 0 ? M.chuteTop : M.deckIn - 0.6, y1 = M.domeTop;
+      this.box([0.1, (y1 - y0) / 2, side / 2 + 0.1], [Math.cos(a) * wallR, (y0 + y1) / 2, Math.sin(a) * wallR], q(0, -a, 0));
     }
     for (let i = 0; i < 4; i++) {
       const a = Math.PI / 4 + (i * Math.PI) / 2;
       const len2 = M.apothem * octFactor(a) - 5.4;
       this.box([len2 / 2, 0.7, 0.03], [Math.cos(a) * (5.4 + len2 / 2), M.deckOut + 0.7, Math.sin(a) * (5.4 + len2 / 2)], q(0, -a, 0));
     }
+
+    for (let i = 0; i < 4; i++) this.buildChute(i);
 
     for (let i = 0; i < 4; i++) {
       // 下段と、上段の左右のガイド
@@ -171,13 +176,43 @@ export class Physics {
     }
   }
 
+  // 下段の手前の穴から取り出し口までの通り道。下へ落ちて、斜めの底を滑って手前の取り出し口へ出てくる
+  private buildChute(i: number) {
+    const W = M.stageW / 2 + 0.2;           // 通り道の幅の半分
+    const inner = M.lowerOut - 0.1;         // 奥の壁
+    const front = M.apothem + M.trayDepth;  // 取り出し口のふた
+    // 奥の壁（下段の下）
+    const top = M.lowerTop - 0.4;
+    this.seatBox(i, [0.1, (top - M.chuteFloor) / 2, W], [inner - 0.1, (top + M.chuteFloor) / 2, 0]);
+    // 左右の壁
+    const wallTop = M.deckOut + 0.1;
+    const midX = (inner + front) / 2;
+    for (const s of [-1, 1]) this.seatBox(i, [(front - inner) / 2 + 0.1, (wallTop - M.chuteFloor + 1) / 2, 0.06], [midX, (wallTop + M.chuteFloor - 1) / 2, s * (W + 0.06)]);
+    // 穴の左右のデッキ（穴以外は坂のまま川へ滑る）
+    const slope = (M.deckOut - M.deckIn) / (M.apothem + 0.2 - M.riverOut);
+    const patchIn = M.lowerOut - 0.05, patchOut = M.apothem + 0.3;
+    const patchY = M.deckIn + ((patchIn + patchOut) / 2 - M.riverOut) * slope - 0.1;
+    const halfSide = patchOut * Math.tan(Math.PI / 8) + 0.05;
+    const hz = (halfSide - W - 0.12) / 2;
+    for (const s of [-1, 1]) this.seatBox(i, [(patchOut - patchIn) / 2, 0.1, hz], [(patchIn + patchOut) / 2, patchY, s * (W + 0.12 + hz)], Math.atan(slope), true);
+    // 斜めの底（滑りやすい）
+    const y0 = 4.7, y1 = M.chuteFloor;
+    const len = Math.hypot(front - inner, y0 - y1);
+    const tilt = Math.atan2(y1 - y0, front - inner);
+    const T = 0.15;
+    this.seatBox(i, [len / 2, T, W + 0.1], [midX + Math.sin(tilt) * T, (y0 + y1) / 2 - Math.cos(tilt) * T, 0], tilt, true);
+    // 取り出し口の天井と透明なふた
+    this.seatBox(i, [M.trayDepth / 2 + 0.1, 0.08, W + 0.1], [M.apothem + M.trayDepth / 2, M.chuteTop + 0.08, 0]);
+    this.seatBox(i, [0.06, (M.chuteTop - M.chuteFloor + 0.6) / 2, W + 0.1], [front + 0.06, (M.chuteTop + M.chuteFloor - 0.6) / 2, 0]);
+  }
+
   // 上段の目標位置（時刻 t）
   upperOffset(i: number, t: number) {
     return Math.sin((t * Math.PI * 2) / MOTION.pushPeriod + i * 1.3) * MOTION.pushAmp;
   }
 
-  private shovelTarget(i: number, x: number, y: number, pitch: number) {
-    const [wx, wz] = seatToWorld(i, x, 0);
+  private shovelTarget(i: number, x: number, y: number, z: number, pitch: number) {
+    const [wx, wz] = seatToWorld(i, x, z);
     const t = { pos: new THREE.Vector3(wx, y, wz), rot: seatQuat(i).multiply(q(pitch, 0, 0)) };
     this.shovelPose[i] = t;
     return t;
@@ -198,6 +233,7 @@ export class Physics {
       // 刃を下ろした瞬間は先端がいちばん低いので、景品は先端のあたりにたまる。先端のすぐ前までを範囲に含める
       if (Math.abs(v.x) > 0.7 * S || v.z < -0.45 * S || v.z > 0.68 * S || v.y < -0.54 * S || v.y > 0.08 * S) continue;
       if (list.length >= 6) break;
+      if (list.some((c) => c.p === p)) continue;
       const pr = p.body.rotation();
       list.push({ p, pos: v, rot: inv.clone().multiply(new THREE.Quaternion(pr.x, pr.y, pr.z, pr.w)) });
       p.body.setBodyType(RAPIER.RigidBodyType.KinematicPositionBased, true);
@@ -230,15 +266,15 @@ export class Physics {
   }
 
   // ショベルをその場に置く（最初の1回だけ）
-  placeShovel(i: number, x: number, y: number, pitch: number) {
-    const t = this.shovelTarget(i, x, y, pitch);
+  placeShovel(i: number, x: number, y: number, z: number, pitch: number) {
+    const t = this.shovelTarget(i, x, y, z, pitch);
     this.shovels[i].setTranslation(t.pos, false);
     this.shovels[i].setRotation(t.rot, false);
   }
 
   // 次のステップでの手首の位置と角度
-  driveShovel(i: number, x: number, y: number, pitch: number) {
-    const t = this.shovelTarget(i, x, y, pitch);
+  driveShovel(i: number, x: number, y: number, z: number, pitch: number) {
+    const t = this.shovelTarget(i, x, y, z, pitch);
     this.shovels[i].setNextKinematicTranslation(t.pos);
     this.shovels[i].setNextKinematicRotation(t.rot);
   }
@@ -267,18 +303,11 @@ export class Physics {
     const def = PRIZE[key];
     const rot = q(opts.tilt ? (Math.random() - 0.5) * 0.6 : 0, opts.yaw ?? Math.random() * Math.PI * 2, opts.tilt ? (Math.random() - 0.5) * 0.6 : 0);
     const body = this.world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(rot).setLinearDamping(0.05).setAngularDamping(0.3),
+      RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(rot).setLinearDamping(0.05).setAngularDamping(1.5),
     );
     const mass = def.mass * scale * scale * scale;
-    let collider: RAPIER.ColliderDesc;
-    if (def.spheres && def.spheres.length === 1) {
-      collider = RAPIER.ColliderDesc.ball(def.spheres[0][3] * scaleOf(def) * scale);
-    } else if (key === 'stick') {
-      const cr = 0.06 * scaleOf(def) * scale;
-      collider = RAPIER.ColliderDesc.capsule(Math.max(half.x - cr, 0.02), cr).setRotation(q(0, 0, Math.PI / 2));
-    } else {
-      collider = RAPIER.ColliderDesc.cuboid(Math.max(half.x * 0.95, 0.03), Math.max(half.y * 0.95, 0.03), Math.max(half.z * 0.95, 0.03));
-    }
+    // すべて箱の形にする（球や円柱だと川の上で転がり続けて、回って見えるため）
+    const collider = RAPIER.ColliderDesc.cuboid(Math.max(half.x * 0.95, 0.03), Math.max(half.y * 0.95, 0.03), Math.max(half.z * 0.95, 0.03));
     this.world.createCollider(collider.setMass(mass).setFriction(FRICTION.prize).setRestitution(0.05), body);
 
     let obj: THREE.Object3D | null = null;
@@ -287,7 +316,7 @@ export class Physics {
       obj.scale.multiplyScalar(scale);
       this.scene.add(obj);
     }
-    const p: Prize = { id: this.nextId++, key, variant, scale, body, template, obj };
+    const p: Prize = { id: this.nextId++, key, variant, scale, body, template, obj, chuteT: 0, removeAt: 0 };
     this.prizes.push(p);
     return p;
   }
@@ -330,10 +359,16 @@ export class Physics {
     this.world.step();
 
     // 落ちた景品を調べる
+    const now = this.stepCount * PHYSICS.step;
     for (let k = this.prizes.length - 1; k >= 0; k--) {
       const p = this.prizes[k];
+      // 取り出し口に届いた景品は、少し見せてから消す
+      if (p.removeAt) {
+        if (now >= p.removeAt) this.removePrize(p);
+        continue;
+      }
       const pos = p.body.translation();
-      if (pos.y < 5 || Math.hypot(pos.x, pos.z) > 9.5) {
+      if (pos.y < 1.5 || Math.hypot(pos.x, pos.z) > 11.5) {
         this.onLost(p);
         this.removePrize(p);
         continue;
@@ -342,9 +377,17 @@ export class Physics {
       const ang = Math.atan2(pos.z, pos.x);
       const i = ((Math.round(ang / (Math.PI / 2)) % 4) + 4) % 4;
       const [sx, sz] = worldToSeat(i, pos.x, pos.z);
-      if (sx > M.lowerOut + 0.02 && Math.abs(sz) < M.stageW / 2 + 0.15) {
+      if (sx <= M.lowerOut + 0.02 || Math.abs(sz) > M.stageW / 2 + 0.2) continue;
+      // シャッターが閉じていれば、穴に落ちたところで機械が回収する
+      if (!this.collecting(i)) {
+        if (pos.y < M.deckIn - 0.1) this.removePrize(p);
+        continue;
+      }
+      p.chuteT += PHYSICS.step;
+      // 取り出し口に届いたら獲得。通り道で詰まっても、少し待てば獲得にする
+      if ((sx > M.apothem - 0.2 && pos.y < M.chuteTop) || p.chuteT > 2.5) {
         this.onSlot(i, p);
-        this.removePrize(p);
+        p.removeAt = now + 1.4;
       }
     }
   }

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { M, MONEY, TIMING, STOCK, PHYSICS, ARM, MOTION } from './config';
 import { buildMachineVisual, MachineVisual } from './machine/visual';
+import { buildDancer, Dancer } from './machine/dancer';
 import { Physics, Prize, stirLift, stirPose } from './physics';
 import { Arm, poseVisual, ArmPhase } from './arm';
 import { PRIZE, BIG_KEYS, randomNormalKey, getTemplate } from './prizes/catalog';
@@ -29,6 +30,8 @@ export class Game {
   camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
   controls: OrbitControls;
   machine: MachineVisual;
+  dancer: Dancer;
+  private ray = new THREE.Raycaster();
   physics: Physics;
   arms = [0, 1, 2, 3].map(() => new Arm());
   layouts: SeatLayout[] = [];
@@ -70,25 +73,30 @@ export class Game {
     sun.target.position.set(0, 8, 0);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10, near: 1, far: 50 });
+    Object.assign(sun.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 60 });
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
     s.add(sun, sun.target);
 
     this.machine = buildMachineVisual();
     s.add(this.machine.root);
+    this.dancer = buildDancer();
+    this.dancer.group.position.y = 9.8;
+    this.dancer.group.scale.setScalar(1.35);
+    s.add(this.dancer.group);
     this.physics = new Physics(s);
     this.physics.onSlot = (i, p) => this.onSlot(i, p);
+    this.physics.collecting = (i) => i === this.seat && this.shutterOpen && this.mode === 'play' && !this.cleared;
 
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.enableDamping = true;
     this.controls.minDistance = 6;
-    this.controls.maxDistance = 38;
+    this.controls.maxDistance = 55;
     this.controls.maxPolarAngle = Math.PI * 0.47;
     this.controls.addEventListener('start', () => { this.camGoal = null; });
 
     this.arms.forEach((a, i) => {
-      this.physics.placeShovel(i, a.pose.x, a.pose.y, a.pose.pitch);
+      this.physics.placeShovel(i, a.pose.x, a.pose.y, a.pose.z, a.pose.pitch);
       poseVisual(this.machine.seats[i], a.pose);
     });
     this.arms[0].onPhase = (p) => this.onArmPhase(p);
@@ -185,11 +193,13 @@ export class Game {
   seatView(i: number) {
     const a = i * Math.PI / 2;
     const eye = new THREE.Vector3(Math.cos(a + 0.35), 0, Math.sin(a + 0.35));
+    // 台全体と、手前の操作盤・取り出し口まで見えるように、少し引いて見る
     const portrait = this.camera.aspect < 0.8;
-    const dist = portrait ? 15.5 : 16.5;
+    const k = portrait && this.camera.aspect < 0.6 ? 1.15 : 1; // 細長いスマホでは台の左右が切れないよう、もう少し引く
+    const dist = (portrait ? 29 : 28) * k;
     return {
-      pos: eye.multiplyScalar(dist).add(new THREE.Vector3(0, portrait ? 17.5 : 15.5, 0)),
-      target: new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(3.4).add(new THREE.Vector3(0, portrait ? 8.0 : 8.4, 0)),
+      pos: eye.multiplyScalar(dist).add(new THREE.Vector3(0, (portrait ? 28 : 24) * k, 0)),
+      target: new THREE.Vector3(Math.cos(a), 0, Math.sin(a)).multiplyScalar(2.5).add(new THREE.Vector3(0, portrait ? 6.0 : 7.0, 0)),
     };
   }
 
@@ -254,6 +264,33 @@ export class Game {
     if (!this.canDrop) return;
     this.arms[this.seat].drop();
     this.ev.hud();
+  }
+
+  // 台のボタンを押した（状態に応じて、すくう／おとす）
+  pressButton() {
+    if (!this.canDrop && !this.canScoop) return false;
+    this.machine.seats[this.seat].button.press();
+    if (this.canDrop) this.drop();
+    else this.scoop();
+    return true;
+  }
+
+  // 画面の座標が、遊んでいる席の台のボタンに当たっているか
+  hitsButton(clientX: number, clientY: number) {
+    if (this.mode !== 'play') return false;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    this.ray.setFromCamera(new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1), this.camera);
+    return this.ray.intersectObject(this.machine.seats[this.seat].button.hit, false).length > 0;
+  }
+
+  // 台のボタンの画面上の位置（案内の表示用）
+  buttonScreenPos() {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const v = new THREE.Vector3();
+    this.machine.seats[this.seat].button.group.getWorldPosition(v);
+    v.y += 0.3;
+    v.project(this.camera);
+    return { x: ((v.x + 1) / 2) * r.width, y: ((1 - v.y) / 2) * r.height, visible: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 };
   }
 
   private onArmPhase(p: ArmPhase) {
@@ -359,12 +396,14 @@ export class Game {
   // ---- 進める ----
   private stepFixed(h: number) {
     this.time += h;
+    // 手首を回して進むあいだ、刃の前に来た景品もすくい上げる
+    if (this.arms[this.seat].phase === 'scoop') this.physics.capture(this.seat);
     // 運ぶ途中で、まれに景品がこぼれる（1回の運搬で1割ほど）
     if (this.arms[this.seat].phase === 'carry' && Math.random() < 0.1 * h / ARM.t.carry) this.physics.slipOne(this.seat);
     for (let i = 0; i < 4; i++) {
       const a = this.arms[i];
       a.update(h);
-      this.physics.driveShovel(i, a.pose.x, a.pose.y, a.pose.pitch);
+      this.physics.driveShovel(i, a.pose.x, a.pose.y, a.pose.z, a.pose.pitch);
       this.physics.driveUpper(i, this.time);
     }
     this.physics.driveStirrers(this.time);
@@ -425,14 +464,23 @@ export class Game {
       poseVisual(s, this.arms[i].pose);
     });
     const seatV = this.machine.seats[this.seat];
-    seatV.flap.visible = !this.shutterOpen;
     seatV.display.set(this.credits);
+    this.dancer.update(this.time);
+    // 穴のふたと、台のボタンの色
+    const phase = this.arms[this.seat].phase;
+    const dropSide = phase === 'waitDrop' || phase === 'dump' || phase === 'hold' || phase === 'reset';
+    this.machine.seats.forEach((s, i) => {
+      const mine = i === this.seat && this.mode === 'play';
+      s.shutter.visible = !(mine && this.shutterOpen);
+      const ready = mine && (this.canScoop || this.canDrop);
+      s.button.set(ready ? (this.canDrop ? 'drop' : 'scoop') : 'off', ready, this.time, mine && dropSide ? 'drop' : 'scoop');
+    });
 
     // カメラ
     if (this.mode === 'title') {
       this.orbitAngle += dt * 0.12;
       const a = this.orbitAngle;
-      this.camera.position.set(Math.cos(a) * 21, 17, Math.sin(a) * 21);
+      this.camera.position.set(Math.cos(a) * 27, 20, Math.sin(a) * 27);
       this.controls.target.set(0, 8.5, 0);
     } else if (this.camGoal) {
       this.camera.position.lerp(this.camGoal.pos, 1 - Math.pow(0.02, dt));

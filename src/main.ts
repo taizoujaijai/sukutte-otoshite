@@ -113,21 +113,15 @@ async function boot() {
     $('spent').textContent = String(game.spent);
     $('credit').textContent = String(game.credits);
     ($('btn-coin') as HTMLButtonElement).disabled = !game.canCoin;
-    // 「すくう」と「おとす」は1つのボタンで切り替える
+    // 台のボタンの案内
     const phase = game.arms[game.seat].phase;
-    const dropSide = phase === 'waitDrop' || phase === 'dump' || phase === 'hold' || phase === 'reset';
-    const btn = $('btn-action') as HTMLButtonElement;
-    let label = 'すくう', sub = '';
-    if (phase === 'waitDrop') label = 'おとす';
-    else if (dropSide) { label = 'おとす'; sub = 'おとしています…'; }
-    else if (phase !== 'idle') sub = 'すくっています…';
-    else if (game.credits === 0 && game.mode === 'play') sub = 'コインを入れてね';
-    $('btn-action-label').textContent = label;
-    $('btn-action-sub').textContent = sub;
-    btn.classList.toggle('scoop', !dropSide);
-    btn.classList.toggle('drop', dropSide);
-    btn.disabled = !(game.canScoop || game.canDrop);
-    btn.classList.toggle('ready', game.canScoop || game.canDrop);
+    let hint = '';
+    if (game.canDrop) hint = '台のピンクのボタンを押して、おとす';
+    else if (game.canScoop) hint = '台の青いボタンを押して、すくう';
+    else if (phase === 'dump' || phase === 'hold' || phase === 'reset') hint = 'おとしています…';
+    else if (phase !== 'idle') hint = 'すくっています…';
+    else if (game.mode === 'play' && !game.cleared) hint = 'コインを入れてね';
+    $('hint').textContent = hint;
     ($('btn-onedari') as HTMLButtonElement).disabled = game.cleared;
   }
   function updateTimer() {
@@ -272,8 +266,18 @@ async function boot() {
   $('seat-ok').onclick = startPlay;
 
   $('btn-coin').onclick = () => game.insertCoin();
-  const action = () => { if (game.canDrop) game.drop(); else game.scoop(); updateHud(); };
-  $('btn-action').onclick = action;
+  const action = () => { game.pressButton(); updateHud(); };
+  // 台の上のボタンをタップ／クリックで押す。ドラッグ（視点を回す操作）のときは押さない
+  const canvas = game.renderer.domElement;
+  let downX = 0, downY = 0, downT = 0;
+  canvas.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; downT = performance.now(); sound.unlock(); });
+  canvas.addEventListener('pointerup', (e) => {
+    if (Math.hypot(e.clientX - downX, e.clientY - downY) > 12 || performance.now() - downT > 600) return;
+    if (game.hitsButton(e.clientX, e.clientY)) action();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    canvas.style.cursor = e.pointerType === 'mouse' && game.hitsButton(e.clientX, e.clientY) && (game.canScoop || game.canDrop) ? 'pointer' : '';
+  });
   $('btn-onedari').onclick = () => game.begOnedari();
   $('btn-chest').onclick = openChest;
   $('btn-camera').onclick = () => game.lookAtSeat(game.seat);
@@ -314,6 +318,12 @@ async function boot() {
     const dt = (now - last) / 1000;
     last = now;
     game.update(dt);
+    // 押せるときは、台のボタンの上に「おして！」を出す
+    const ready = game.mode === 'play' && (game.canScoop || game.canDrop);
+    const bp = ready ? game.buttonScreenPos() : null;
+    const pointer = $('btn-pointer');
+    pointer.hidden = !(bp && bp.visible);
+    if (bp) pointer.style.transform = `translate(${bp.x}px, ${bp.y}px)`;
     timerT += dt;
     if (timerT > 0.2) { timerT = 0; updateTimer(); updateHud(); }
     if (debug) {
